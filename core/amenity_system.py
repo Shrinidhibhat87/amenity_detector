@@ -56,17 +56,17 @@ class PropertyAmenitySystem:
             image_path: Path to the image file
             
         Returns:
-            Tuple of (amenities, description)
+            Tuple of (amenities_by_room, description, detected_amenities)
         """
         self.logger.info(f"Processing image: {image_path}")
 
         # Detect amenities
-        amenities, description, detected_amenities = self.detector.detect_amenities(image_path)
+        amenities_by_room, description, detected_amenities = self.detector.detect_amenities(image_path)
 
         # Save results
-        self.data_manager.save_results(image_path, amenities, description, detected_amenities)
+        self.data_manager.save_results(image_path, amenities_by_room, description, detected_amenities)
         
-        return amenities, description
+        return amenities_by_room, description, detected_amenities
 
     def process_directory(self, directory_path: str) -> pd.DataFrame:
         """
@@ -96,8 +96,9 @@ class PropertyAmenitySystem:
         # Process each image
         for img_path in image_paths:
             try:
-                amenities, description = self.process_image(str(img_path))
+                amenities_by_room, description, detected_amenities = self.process_image(str(img_path))
                 self.logger.info(f"Processed {img_path}")
+                self.logger.info(f"Detected ameneties: {detected_amenities}")
                 self.logger.info(f"Description: {description}")
             except Exception as e:
                 self.logger.error(f"Error processing {img_path}: {e}")
@@ -125,8 +126,8 @@ class PropertyAmenitySystem:
         
         try:
             image.save(temp_path)
-            amenities, description = self.process_image(str(temp_path))
-            return amenities, description
+            amenities_by_room, description, detected_amenities = self.process_image(str(temp_path))
+            return amenities_by_room, description, detected_amenities
         finally:
             # Clean up the temporary file
             if temp_path.exists():
