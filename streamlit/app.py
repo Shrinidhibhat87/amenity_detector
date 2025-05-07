@@ -12,14 +12,19 @@ import logging
 
 import torch
 import os
-# torch.classes.__path__ = [] # add this line to manually set it to empty.
-torch.classes.__path__ = [os.path.join(torch.__path__[0], torch.classes.__file__)] 
+# Fix the torch.classes path issue safely
+try:
+    torch.classes.__path__ = [os.path.join(torch.__path__[0], 'classes')]
+except (AttributeError, TypeError):
+    pass
 
 from typing import Dict, Tuple
 from PIL import Image
 
 # Add the project root to Python path if needed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+
 
 # Setup logging
 logging.basicConfig(
