@@ -1,0 +1,26 @@
+# Default configuration for Property Amenity Detection system
+
+# Input settings
+input:
+  path: "/home/s.bhat/Datasets/AirBnB_Images/frankfurt/house_1/"
+
+# Model settings
+model:
+  name: "llava-hf/llava-1.5-7b-hf"  # LLaVA model to use for detection
+  # Alternatively, you could use other VLM models like:
+  # - "llava-hf/llava-1.6-mistral-7b-hf"
+  # - "llava-hf/llava-1.5-13b-hf"
+
+# Amenity schema settings
+amenity_schema:
+  from_file: false  # Whether to load schema from a file
+  file_path: "./schema.json"  # Path to custom schema if from_file is true
+
+# Output settings
+output:
+  #model_weight_dir: "/home/s.bhat/Coding/amenity_detection/model/LlavaModel"
+  directory: "/home/s.bhat/Outputs/AmenityDetection"
+
+# Logging settings
+logging:
+  level: "INFO"
