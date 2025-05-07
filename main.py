@@ -47,11 +47,11 @@ def main(config: DictConfig):
             print(results)
     else:
         # Process a single image
-        amenities, description = system.process_image(config.input.path)
-        
+        amenities_by_room, description, detected_amenities = system.process_image(config.input.path)
+        logger.info(f"The detected amenities are {detected_amenities}")
         # Print results
         print("\nDetected Amenities:")
-        for room_type, room_amenities in amenities.items():
+        for room_type, room_amenities in amenities_by_room.items():
             present = [amenity for amenity, is_present in room_amenities.items() if is_present]
             if present:
                 print(f"  {room_type.capitalize()}: {', '.join(present)}")
