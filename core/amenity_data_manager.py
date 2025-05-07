@@ -77,7 +77,8 @@ class AmenityDataManager:
     def save_results(self, 
                     image_path: str, 
                     amenities: Dict[str, Dict[str, bool]],
-                    description: str) -> None:
+                    description: str,
+                    detected_amenities: Dict[str, bool]) -> None:
         """
         Save detection results to both CSV and SQLite formats.
         
@@ -85,6 +86,7 @@ class AmenityDataManager:
             image_path: Path to the processed image
             amenities: Dictionary of detected amenities
             description: Generated property description
+            detected_amenities: Flat dictionary of all detected amenities
         """
         # Get image name from path
         image_name = os.path.basename(image_path)
@@ -92,7 +94,7 @@ class AmenityDataManager:
         self._save_to_sqlite(image_name, image_path, amenities, description)
         
         # Save to CSV
-        self._save_to_csv(image_name, image_path, amenities, description)
+        self._save_to_csv(image_name, image_path, detected_amenities, description)
 
         self.logger.info(f"Results for {image_path} saved to database and CSV")
 
@@ -132,7 +134,7 @@ class AmenityDataManager:
         self,
         image_name: str,
         image_path: str,
-        amenities: Dict[str, Dict[str, bool]],
+        detected_amenities: Dict[str, bool],
         description: str
     ) -> None:
         """Save results to CSV file."""
@@ -143,9 +145,9 @@ class AmenityDataManager:
             "description": description
         }
         
-        for room_type, room_amenities in amenities.items():
-            for amenity_name, is_present in room_amenities.items():
-                flat_data[f"{room_type}_{amenity_name}"] = int(is_present)
+        # Add all detected amenities
+        for amenity_name, is_present in detected_amenities.items():
+            flat_data[amenity_name] = int(is_present)
         
         # Check if file exists to determine if we need to write header
         file_exists = os.path.exists(self.csv_path) and os.path.getsize(self.csv_path) > 0
@@ -153,7 +155,14 @@ class AmenityDataManager:
         # Get all possible columns to ensure consistent CSV structure
         if not file_exists:
             # First time writing, use all columns from amenity schema
-            fieldnames = ["image_name", "image_path", "description"] + self.all_amenities
+            # Get flattened list of all possible amenities
+            all_amenities = []
+            for amenities in self.amenity_schema.values():
+                all_amenities.extend(amenities)
+            all_amenities = sorted(list(set(all_amenities)))
+
+            fieldnames = ["image_name", "image_path", "description"] + all_amenities
+
         else:
             # For existing file, read header to ensure we maintain all columns
             with open(self.csv_path, 'r', newline='') as csvfile:

@@ -61,10 +61,10 @@ class PropertyAmenitySystem:
         self.logger.info(f"Processing image: {image_path}")
 
         # Detect amenities
-        amenities, description, _ = self.detector.detect_amenities(image_path)
+        amenities, description, detected_amenities = self.detector.detect_amenities(image_path)
 
         # Save results
-        self.data_manager.save_results(image_path, amenities, description)
+        self.data_manager.save_results(image_path, amenities, description, detected_amenities)
         
         return amenities, description
 

@@ -63,28 +63,30 @@ class LlavaModel:
         self.logger.info(f"LLaVA model loaded and moved to {self.device}")
         
 
-    def generate_description(self, img: Image.Image, room_amenities: Dict[str, List[str]]) -> str:
+    def generate_description(self, img: Image.Image, detected_amenities: Dict[str, List[str]]) -> str:
         """
         Generate a natural language description of a property based on detected amenities.
         
         Args:
             img (str): Image from which to generate the description
-            room_amenities: Dictionary of detected amenities by room type
+            detected_amenities: Dictionary amenities and their boolean presence
             
         Returns:
             A natural language description of the property
         """
         self.logger.info("Generating property description")
 
-        if not any(room_amenities.values()):
-            return "No notable amenities were detected in this property."
+        # Check if any amenities were detected
+        present_amenities = [amenity for amenity, is_present in detected_amenities.items() if is_present]
+
+        if not present_amenities:
+            return "Unfortunately, no notable amenities were detected in this property."
         
         # Create a prompt that organizes amenities by room
         prompt = "Generate a natural and appealing property description highlighting these amenities:\n"
-        
-        for room_type, room_amenities in room_amenities.items():
-            if room_amenities:
-                prompt += f"- {room_type.replace('_', ' ')}: {', '.join(room_amenities)}\n"
+        prompt += ", ".join(present_amenities)
+        prompt += f"\n\nBased on these amenities, classify if this is propery image is a kitchen or a living room or "
+        f"a bathroom, or a bedroom, and include that in your description."
 
         conversation = [
             {
@@ -121,7 +123,7 @@ class LlavaModel:
                 temperature=0.7,
                 top_p=0.9
             )
-        
+
         description = self.processor.decode(outputs[0], skip_special_tokens=True)
 
         # From this we have to extract 'ASSISTANT:' part

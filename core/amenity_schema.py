@@ -5,7 +5,7 @@ from typing import Dict, List
 
 AMENITY_SCHEMA = {
     "kitchen": [
-        "refrigerator", "fridge", "oven", "microwave", "dishwasher", "sink", "stove", "toaster",
+        "refrigerator", "oven", "microwave", "dishwasher", "sink", "stove", "toaster",
         "blender", "kettle", "coffee_maker", "cutlery", "utensils", "plates", "bowls",
         "bar_counter", "washing_machine"
     ],
@@ -28,8 +28,8 @@ AMENITY_SCHEMA = {
         "bbq_grill", "outdoor_furniture", "parking_space"
     ],
     "common": [
-        "wifi", "heating", "air_conditioning", "smoke_detector",
-        "security_camera", "elevator", "wheelchair_accessible"
+        "wifi", "heating", "smoke_detector","security_camera",
+        "elevator", "wheelchair_accessible"
     ]
 }
 
