@@ -56,10 +56,10 @@ class AmenityDetector:
             image_path: Path to the image file
             
         Returns:
-            Tuple of (amenities_by_room, description, present_amenities_by_room)
+            Tuple of (amenities_by_room, description, detected_amenities)
             - amenities_by_room: Dictionary mapping room types to amenities and their presence status
             - description: Generated natural language description
-            - present_amenities_by_room: Dictionary mapping room types to lists of present amenities
+            - detected_amenities: Flat dictionary of amenities and their presence status
         """
         self.logger.info(f"Processing image: {image_path}")
         
@@ -85,6 +85,7 @@ class AmenityDetector:
         amenities_by_room = {room_type: {} for room_type in self.amenity_schema}
         present_amenities_by_room = {room_type: [] for room_type in self.amenity_schema}
         
+        # Instead of returning present_amenities_by_room, lets return detected_amenities to keep it simple
         for room_type, amenities in self.amenity_schema.items():
             for amenity in amenities:
                 is_present = detected_amenities.get(amenity, False)
@@ -93,6 +94,6 @@ class AmenityDetector:
                     present_amenities_by_room[room_type].append(amenity)
         
         # Generate description
-        description = self.model.generate_description(img= image, room_amenities=present_amenities_by_room)
+        description = self.model.generate_description(img=image, detected_amenities=detected_amenities)
         
-        return amenities_by_room, description, present_amenities_by_room
+        return amenities_by_room, description, detected_amenities
