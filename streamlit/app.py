@@ -56,8 +56,8 @@ def main():
         st.header("Options")
         api_mode = st.radio(
             "Mode",
-            ["Direct Inference", "Use API"],
-            help="Choose whether to use the API or run inference directly"
+            ["Direct Inference"], # "Use API" is removed because it is not working yet
+            help="Currently only direct inference is the working mode" #Choose whether to use the API or run inference directly
         )
         
         st.markdown("---")
@@ -85,13 +85,14 @@ def main():
                 with st.spinner("Processing image..."):
                     if api_mode == "Direct Inference":
                         # Use direct inference
-                        amenities, description, processing_time = process_image_directly(image)
+                        amenities_by_room, description, detected_amenities, processing_time = process_image_directly(image)
                     else:
                         # Use the API
-                        amenities, description, processing_time = process_image_via_api(uploaded_file)
+                        amenities_by_room, description, processing_time = process_image_via_api(uploaded_file)
                     
                     # Store results in session state for display
-                    st.session_state.amenities = amenities
+                    st.session_state.amenities_by_room = amenities_by_room
+                    st.session_state.detected_amenities = detected_amenities
                     st.session_state.description = description
                     st.session_state.processing_time = processing_time
                     st.session_state.processed = True
@@ -108,17 +109,31 @@ def main():
             st.write(st.session_state.description)
             
             # Show amenities
-            st.subheader("Detected Amenities")
-            
+            # st.subheader("Detected Amenities")
+            # Display a list of detected amenities (only the ones that are true)
+            if st.session_state.detected_amenities:
+                true_amenities = [
+                    amenity.replace('_', ' ').title() 
+                    for amenity, is_present in st.session_state.detected_amenities.items() 
+                    if is_present
+                ]
+                
+                if true_amenities:
+                    st.markdown("### Detected amenities:")
+                    for amenity in true_amenities:
+                        st.markdown(f"- **{amenity}**")
+                else:
+                    st.write("No amenities detected")
+
             # Create a more user-friendly display of amenities
-            for room_type, amenities in st.session_state.amenities.items():
-                if any(amenities.values()):  # Only show room types with detected amenities
-                    with st.expander(f"{room_type.capitalize()}"):
-                        amenities_list = [amenity for amenity, is_present in amenities.items() if is_present]
-                        if amenities_list:
-                            st.write(", ".join(amenities_list))
-                        else:
-                            st.write("No amenities detected")
+            #for room_type, amenities in st.session_state.amenities_by_room.items():
+                #if any(amenities.values()):  # Only show room types with detected amenities
+                    #with st.expander(f"{room_type.capitalize()}"):
+                        #amenities_list = [amenity for amenity, is_present in amenities.items() if is_present]
+                        #if amenities_list:
+                            #st.write(", ".join(amenities_list))
+                        #else:
+                            #st.write("No amenities detected")
 
 def process_image_via_api(uploaded_file) -> Tuple[Dict[str, Dict[str, bool]], str, float]:
     """
@@ -202,12 +217,12 @@ def process_image_directly(image) -> Tuple[Dict[str, Dict[str, bool]], str, floa
         start_time = time.time()
         
         # Process the image
-        amenities, description = system.process_image_from_memory(image, image_name)
-        
+        amenities_by_room, description, detected_amenities = system.process_image_from_memory(image, image_name)
+
         # End timing
         processing_time = time.time() - start_time
         
-        return amenities, description, processing_time
+        return amenities_by_room, description, detected_amenities, processing_time
         
     except Exception as e:
         st.error(f"Error: {str(e)}")
