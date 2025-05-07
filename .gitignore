@@ -1,0 +1,25 @@
+# Hydra log files and checkpoints
+*.log
+*.hydra
+
+# All the cache files
+*__pycache__/
+
+# Specific model checkpoints
+model/GitForCausalLM/
+model/Salesforce_blip2_flan_t5_xl/
+model/LlavaModel/
+model/InstructBlip/
+
+# Old project files, which I did not want to delete
+old_project/
+
+# Images and plots
+plots/
+
+# Outputs directory
+outputs/
+
+# VS code settings
+.vscode/
+
