@@ -1,0 +1,37 @@
+# Configuration management
+hydra-core>=1.3.0
+omegaconf>=2.3.0
+
+# Core libraries
+accelerate>=1.6.0
+torch>=2.4.0
+torchvision>=0.18.0
+transformers>=4.37.0
+
+
+# Data augmentation
+# albumentations>=2.0.0
+
+# Logging
+# wandb>=0.15.0
+
+# Endpoint and deployment
+fastapi>=0.115.9
+uvicorn>=0.34.0
+
+# Important utilities
+bitsandbytes>=0.45.0 # Lighweight python wrapper around CUDA
+numpy>=1.25.0
+pandas>=2.0.0
+scikit-learn>=1.4.0  # For metrics and utilities
+scikit-image>=0.25.0  # Image processing 1
+Pillow>=9.5.0  # Image processing 2
+sentence-transformers>=4.0.0  # For text processing
+faiss-gpu-cu12 # For embedding search and matches from FAIR. CUDA 12.x
+faiss-cpu # For embedding search and matches from FAIR. CPU
+streamlit>=1.40.0 # Streamlit for the web application
+
+# Visualization
+matplotlib>=3.8.0
+seaborn>=0.13.0
+opencv-python>=4.8.0
