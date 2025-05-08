@@ -100,7 +100,7 @@ class LlavaModel:
 
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Please describe the property in highlighting the amenities."},
+                    {"type": "text", "text": "Please describe the property and highlight the amenities."},
                 ],
             },
         ]
