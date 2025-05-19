@@ -8,6 +8,7 @@ import pandas as pd
 import time
 import os
 import sys
+
 import logging
 
 import torch
@@ -24,26 +25,87 @@ from PIL import Image
 # Add the project root to Python path if needed
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+class SteramlitConfigWrapper:
+    def __init__(self):
+        self.config, self.logger = None, None
+        self._setup_hydra_config()
+        self._setup_logger()
 
+    def _setup_logger(self):
+        # Setup logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        self.logger = logging.getLogger(__name__)
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+    def _setup_hydra_config(self):
+        import hydra
+        # from hydra.core.singleton import Singleton
+
+        # Check if Hydra is already initialized and clear it if needed
+        # from hydra.core.singleton import Singleton
+        # from hydra.core.config_store import ConfigStore
+        from hydra.core.global_hydra import GlobalHydra
+        # Clear Hydra if it's already initialized
+        if GlobalHydra.instance().is_initialized():
+            GlobalHydra.instance().clear()
+            
+        # Also clear ConfigStore singleton if needed
+        # ConfigStore.instance().clear()
+
+        # Initialize Hydra with version_base to avoid deprecation warnings
+        hydra.initialize(version_base=None, config_path="../config")
+        
+        # making config global to avoid passing it around (Not sure if this is the best practice)
+        # global config
+        
+        # Compose the configuration, explicitly specifying the return_hydra_config option
+        self.config = hydra.compose(config_name="config", return_hydra_config=True)
+    
+    def process_image_directly(self, image) -> Tuple[Dict[str, Dict[str, bool]], str, float]:
+        """
+        Process an image directly using the PropertyAmenitySystem.
+        
+        Args:
+            image: PIL Image object
+            
+        Returns:
+            Tuple of (amenities, description, processing_time)
+        """
+        # Import here to avoid circular imports
+        from core.amenity_system import PropertyAmenitySystem
+
+        # Initialize the system with configuration
+        system = PropertyAmenitySystem(self.config, logger=self.logger)
+        
+        # Generate a temporary filename
+        image_name = f"temp_{int(time.time())}.jpg"
+        
+        # Start timing
+        start_time = time.time()
+        
+        # Process the image
+        amenities_by_room, description, detected_amenities = system.process_image_from_memory(image, image_name)
+
+        # End timing
+        processing_time = time.time() - start_time
+        
+        return amenities_by_room, description, detected_amenities, processing_time
 
 # Constants
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
-def main():
+def main():    
     """Main function to run the Streamlit app."""
     st.set_page_config(
         page_title="Property Amenity Detection",
         page_icon="🏠",
         layout="wide",
     )
-    
+
+    streamlitconfig = SteramlitConfigWrapper()
+
     st.title("Property Amenity Detection")
     st.markdown("""
     Upload a property image to detect amenities and generate a description.
@@ -85,7 +147,7 @@ def main():
                 with st.spinner("Processing image..."):
                     if api_mode == "Direct Inference":
                         # Use direct inference
-                        amenities_by_room, description, detected_amenities, processing_time = process_image_directly(image)
+                        amenities_by_room, description, detected_amenities, processing_time = streamlitconfig.process_image_directly(image)
                     else:
                         # Use the API
                         amenities_by_room, description, processing_time = process_image_via_api(uploaded_file)
@@ -124,16 +186,25 @@ def main():
                         st.markdown(f"- **{amenity}**")
                 else:
                     st.write("No amenities detected")
+            
+            # Add a download button for the CSV file download
+            st.markdown("---")
+            st.subheader("Download Results")
+            
+            csv_path = os.path.join(streamlitconfig.config.output.directory, "amenities.csv")
+            print(f"CSV Path: {csv_path}")
+            
+            if os.path.exists(csv_path):
+                with open(csv_path, "rb") as file:
+                    st.download_button(
+                        label="Download Amenities CSV",
+                        data=file,
+                        file_name="amenities.csv",
+                        mime="text/csv",
+                    )
+            else:
+                st.warning("No CSV file found. Please process an image first.")
 
-            # Create a more user-friendly display of amenities
-            #for room_type, amenities in st.session_state.amenities_by_room.items():
-                #if any(amenities.values()):  # Only show room types with detected amenities
-                    #with st.expander(f"{room_type.capitalize()}"):
-                        #amenities_list = [amenity for amenity, is_present in amenities.items() if is_present]
-                        #if amenities_list:
-                            #st.write(", ".join(amenities_list))
-                        #else:
-                            #st.write("No amenities detected")
 
 def process_image_via_api(uploaded_file) -> Tuple[Dict[str, Dict[str, bool]], str, float]:
     """
@@ -172,61 +243,6 @@ def process_image_via_api(uploaded_file) -> Tuple[Dict[str, Dict[str, bool]], st
         st.error(f"Error: {str(e)}")
         return {}, f"Error: {str(e)}", 0
 
-def process_image_directly(image) -> Tuple[Dict[str, Dict[str, bool]], str, float]:
-    """
-    Process an image directly using the PropertyAmenitySystem.
-    
-    Args:
-        image: PIL Image object
-        
-    Returns:
-        Tuple of (amenities, description, processing_time)
-    """
-    try:
-        import hydra
-        # from hydra.core.singleton import Singleton
-
-        # Check if Hydra is already initialized and clear it if needed
-        # from hydra.core.singleton import Singleton
-        # from hydra.core.config_store import ConfigStore
-        from hydra.core.global_hydra import GlobalHydra
-        # Clear Hydra if it's already initialized
-        if GlobalHydra.instance().is_initialized():
-            GlobalHydra.instance().clear()
-            
-        # Also clear ConfigStore singleton if needed
-        # ConfigStore.instance().clear()
-
-        # Initialize Hydra with version_base to avoid deprecation warnings
-        hydra.initialize(version_base=None, config_path="../config")
-        
-        # Compose the configuration, explicitly specifying the return_hydra_config option
-        config = hydra.compose(config_name="config", return_hydra_config=True)
-        
-        # Import here to avoid circular imports
-        from core.amenity_system import PropertyAmenitySystem
-
-
-        # Initialize the system with configuration
-        system = PropertyAmenitySystem(config, logger=logger)
-        
-        # Generate a temporary filename
-        image_name = f"temp_{int(time.time())}.jpg"
-        
-        # Start timing
-        start_time = time.time()
-        
-        # Process the image
-        amenities_by_room, description, detected_amenities = system.process_image_from_memory(image, image_name)
-
-        # End timing
-        processing_time = time.time() - start_time
-        
-        return amenities_by_room, description, detected_amenities, processing_time
-        
-    except Exception as e:
-        st.error(f"Error: {str(e)}")
-        return {}, f"Error: {str(e)}", 0
 
 def view_all_results():
     """View all processed results from the API."""
