@@ -110,6 +110,7 @@ class AmenityDataManager:
         cursor = conn.cursor()
         
         # Insert or update image record
+        # ? indicates the placeholder for the values to be inserted
         cursor.execute(
             "INSERT OR REPLACE INTO images (image_path, description, processed_at) VALUES (?, ?, ?)",
             (image_path, description, datetime.now().isoformat())
@@ -144,43 +145,54 @@ class AmenityDataManager:
             "image_path": image_path,
             "description": description
         }
-        
+
         # Add all detected amenities
         for amenity_name, is_present in detected_amenities.items():
             flat_data[amenity_name] = int(is_present)
-        
+
         # Check if file exists to determine if we need to write header
         file_exists = os.path.exists(self.csv_path) and os.path.getsize(self.csv_path) > 0
 
-        # Get all possible columns to ensure consistent CSV structure
-        if not file_exists:
-            # First time writing, use all columns from amenity schema
-            # Get flattened list of all possible amenities
-            all_amenities = []
-            for amenities in self.amenity_schema.values():
-                all_amenities.extend(amenities)
-            all_amenities = sorted(list(set(all_amenities)))
+        # Get current data field names
+        current_fields = list(flat_data.keys())
 
-            fieldnames = ["image_name", "image_path", "description"] + all_amenities
+        if file_exists:
+            with open(self.csv_path, 'r', newline='') as csvfile:
+                reader = csv.DictReader(csvfile)
+                existing_rows = list(reader)
+                existing_fieldnames = reader.fieldnames if reader.fieldnames else []
+
+            # Detect new columns if any
+            new_columns = [field for field in current_fields if field not in existing_fieldnames]
+
+            if new_columns:
+                # Add new columns to existing fieldnames
+                updated_fieldnames = existing_fieldnames + new_columns
+
+                # Rewrite the CSV with updated headers and existing data
+                with open(self.csv_path, 'w', newline='') as csvfile:
+                    writer = csv.DictWriter(csvfile, fieldnames=updated_fieldnames)
+                    writer.writeheader()
+                    for row in existing_rows:
+                        # Fill the missing columns with 0
+                        for col in new_columns:
+                            row[col] = 0
+                        writer.writerow(row)
+                
+                fieldnames = updated_fieldnames
+            else:
+                fieldnames = existing_fieldnames
 
         else:
-            # For existing file, read header to ensure we maintain all columns
-            with open(self.csv_path, 'r', newline='') as csvfile:
-                reader = csv.reader(csvfile)
-                # Get the header row
-                fieldnames = next(reader)
-                
-            # Ensure image_name is in fieldnames if it exists in flat_data
-            if "image_name" not in fieldnames and "image_name" in flat_data:
-                # If we need to add image_name to an existing file, we should rewrite the file
-                # For simplicity, we'll just remove it from flat_data instead
-                del flat_data["image_name"]
-        
+            # First write: use amenity schema to get all possible amenities
+            all_amenities = sorted({a for amenities in self.amenity_schema.values() for a in amenities})
+            fieldnames = ["image_name", "image_path", "description"] + all_amenities
+
         # Ensure all amenity columns are included in the data, even if not in current image
         for field in fieldnames:
-            if field not in flat_data and field not in ["image_name", "image_path", "description"]:
+            if field not in flat_data:
                 flat_data[field] = 0
-        
+
         # Write to CSV
         mode = 'a' if file_exists else 'w'
         with open(self.csv_path, mode, newline='') as csvfile:
