@@ -8,18 +8,17 @@ The script does the followiing:
 
 """
 
-import hydra
-import os
 import logging
+import os
 
+import hydra
 from omegaconf import DictConfig, OmegaConf
 
 from core.amenity_system import PropertyAmenitySystem
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -28,19 +27,19 @@ logger = logging.getLogger(__name__)
 def main(config: DictConfig):
     """
     Main entry point for the property amenity detection system.
-    
+
     Args:
         config: Hydra configuration
     """
     logger.info(f"Configuration:\n{OmegaConf.to_yaml(config)}")
-    
+
     system = PropertyAmenitySystem(config, logger=logger)
-    
+
     if os.path.isdir(config.input.path):
         # Process a directory of images
         results = system.process_directory(config.input.path)
         logger.info(f"Processed {len(results)} images")
-        
+
         if not results.empty:
             # Print summary of results
             print("\nResults Summary:")
@@ -55,7 +54,7 @@ def main(config: DictConfig):
             present = [amenity for amenity, is_present in room_amenities.items() if is_present]
             if present:
                 print(f"  {room_type.capitalize()}: {', '.join(present)}")
-        
+
         print("\nGenerated Description:")
         print(description)
 
