@@ -1,0 +1,95 @@
+[project]
+name = "amenity-detector"
+version = "0.1.0"
+description = "End-to-end amenity detection pipeline for property images using vision-language models."
+requires-python = ">=3.11"
+
+# ── Runtime dependencies ──────────────────────────────────────────────────────
+# Only include libraries that are actually imported in the codebase.
+# Anything not yet used (e.g. RAG, vector stores) goes in when the feature lands.
+dependencies = [
+    # Config management — Hydra reads config/config.yaml and injects into main()
+    "hydra-core>=1.3.0",
+    "omegaconf>=2.3.0",
+
+    # Deep learning — LLaVA model loading and inference (model/llava.py)
+    "torch>=2.4.0",
+    "transformers>=4.37.0",
+    "accelerate>=1.6.0",      # Enables device_map="auto" in from_pretrained()
+    "bitsandbytes>=0.45.0",   # Enables load_in_4bit=True for quantized loading
+
+    # Image handling — PIL used in core/amenity_detector.py and model/llava.py
+    "Pillow>=9.5.0",
+
+    # Data handling
+    "pandas>=2.0.0",          # DataFrames in amenity_data_manager and amenity_system
+    "numpy>=1.25.0",          # Array ops in dataloader and utilities/retriever
+    "scikit-learn>=1.4.0",    # cosine_similarity in utilities/retriever.py
+
+    # API layer — FastAPI + Uvicorn ASGI server (api/)
+    "fastapi>=0.115.9",
+    "uvicorn>=0.34.0",
+
+    # Web UI (will be replaced by Gradio in Phase 3, kept for now)
+    "streamlit>=1.40.0",
+    "requests>=2.31.0",       # streamlit/app.py calls the FastAPI backend
+
+    # Visualisation — used in dataloader/sunrgb_d.py for debug plots
+    "matplotlib>=3.8.0",
+]
+
+# ── Development dependencies ──────────────────────────────────────────────────
+# Install with: uv sync --group dev
+[dependency-groups]
+dev = [
+    "ruff>=0.4.0",        # Linting + formatting (replaces flake8, black, isort)
+    "mypy>=1.10.0",       # Static type checker
+    "pre-commit>=3.7.0",  # Git hook manager — runs ruff + mypy before each commit
+    "pytest>=8.0.0",      # Test runner
+    "types-requests",     # Type stubs for the `requests` library (used by streamlit/app.py)
+    "pandas-stubs",       # Type stubs for pandas
+]
+
+# ── uv project settings ───────────────────────────────────────────────────────
+[tool.uv]
+# This project is NOT a Python package to be published on PyPI.
+# We just use uv to manage the virtual environment and dependencies.
+package = false
+
+# ── Ruff: linting and formatting ──────────────────────────────────────────────
+# Ruff replaces flake8, black, isort, and pyupgrade in a single tool.
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle style errors (e.g. whitespace issues)
+    "W",   # pycodestyle style warnings
+    "F",   # pyflakes (e.g. unused imports, undefined names)
+    "I",   # isort (import ordering)
+    "B",   # flake8-bugbear (common bug patterns)
+    "UP",  # pyupgrade (modernise syntax for Python 3.11+)
+]
+ignore = [
+    "E501",  # line-too-long — ruff format handles line length, not ruff check
+    "B008",  # function call in default argument — FastAPI intentionally uses File(...) and Depends() here
+]
+
+[tool.ruff.lint.isort]
+# Tell ruff which packages belong to THIS project so imports are sorted correctly.
+known-first-party = ["core", "model", "api", "utilities", "dataloader"]
+
+# ── Mypy: static type checking ────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true       # Warn when a function returns Any without being explicit
+warn_unused_configs = true   # Catch typos in mypy config
+ignore_missing_imports = true  # torch, transformers etc. have incomplete stubs — skip them
+
+# ── Pytest: test runner configuration ────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]        # Only look for tests inside the tests/ directory
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
