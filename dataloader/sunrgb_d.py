@@ -1,13 +1,14 @@
 """Python script that creates a dataloder for the SUN RGB-D dataset. We are currently focusing only on 2D images."""
+
 import os
+
+import matplotlib.patches as patches
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import json
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-
-from torch.utils.data import Dataset
 from PIL import Image
+from torch.utils.data import Dataset
+
 from utilities.general_utils import load_json, save_plot
 
 
@@ -39,20 +40,26 @@ class SUNRGBDDataset(Dataset):
             annotation_dir = os.path.join(data_folder_path, "annotation2Dfinal")
             scene_path = os.path.join(data_folder_path, "scene.txt")
 
-            if os.path.exists(image_dir) and os.path.exists(annotation_dir) and os.path.exists(scene_path):
-                image_files = [f for f in os.listdir(image_dir) if f.endswith(('.jpg', '.png'))]
+            if (
+                os.path.exists(image_dir)
+                and os.path.exists(annotation_dir)
+                and os.path.exists(scene_path)
+            ):
+                image_files = [f for f in os.listdir(image_dir) if f.endswith((".jpg", ".png"))]
                 if not image_files:
                     continue
                 image_path = os.path.join(image_dir, image_files[0])
                 annotation_path = os.path.join(annotation_dir, "index.json")
 
                 if os.path.exists(image_path) and os.path.exists(annotation_path):
-                    dataset.append({
-                        "folder_name": data_folder,
-                        "image_path": image_path,
-                        "annotation_path": annotation_path,
-                        "scene_path": scene_path.strip()
-                    })
+                    dataset.append(
+                        {
+                            "folder_name": data_folder,
+                            "image_path": image_path,
+                            "annotation_path": annotation_path,
+                            "scene_path": scene_path.strip(),
+                        }
+                    )
                     count += 1
 
         return dataset
@@ -73,14 +80,14 @@ class SUNRGBDDataset(Dataset):
         item = self.data[idx]
         image = self._load_image(item["image_path"])
         annotations = load_json(item["annotation_path"])
-        with open(item["scene_path"], 'r') as f:
+        with open(item["scene_path"]) as f:
             scene = f.read().strip()
 
         return {
             "folder_name": item["folder_name"],
             "image": image,
             "annotations": annotations,
-            "scene": scene
+            "scene": scene,
         }
 
     def _load_image(self, image_path):
@@ -103,13 +110,13 @@ class SUNRGBDDataset(Dataset):
         """
         segments = []
         labels = []
-        for polygon in annotations['frames'][0]['polygon']:
+        for polygon in annotations["frames"][0]["polygon"]:
             x = polygon["x"]
             y = polygon["y"]
             obj_pointer = polygon["object"]
             points = np.transpose(np.array([x, y], np.int32))
             segments.append(points)
-            labels.append(annotations['objects'][obj_pointer]["name"])
+            labels.append(annotations["objects"][obj_pointer]["name"])
         return labels, segments
 
     def show_annotations(self, idx):
@@ -122,19 +129,23 @@ class SUNRGBDDataset(Dataset):
         image = data["image"]
         annotations = data["annotations"]
         labels, segments = self.get_segments_2d(annotations)
-        
+
         if self.debug:
             image_np = np.array(image)
             fig, ax = plt.subplots(1, figsize=(10, 10))
             ax.imshow(image_np)
 
-            for label, segment in zip(labels, segments):
-                polygon = patches.Polygon(segment, closed=True, edgecolor='red', fill=False, linewidth=2)
+            for label, segment in zip(labels, segments, strict=False):
+                polygon = patches.Polygon(
+                    segment, closed=True, edgecolor="red", fill=False, linewidth=2
+                )
                 ax.add_patch(polygon)
                 x, y = segment[0]
-                ax.text(x, y, label, color='blue', fontsize=10, bbox=dict(facecolor='white', alpha=0.5))
+                ax.text(
+                    x, y, label, color="blue", fontsize=10, bbox=dict(facecolor="white", alpha=0.5)
+                )
 
-            plt.axis('off')
+            plt.axis("off")
             plt.show()
             save_plot(fig, data["folder_name"])
 
