@@ -1,125 +1,175 @@
 # Amenity Detection and Description System
-This system automatically indentifies and detects amenities in property images. Additionally the system also generates a natural language description of the image. It uses a vision-language model, currently we have ([Llava](https://llava-vl.github.io/)), but this can easily be extended further.
 
-## Project Scope
+An end-to-end pipeline that automatically identifies amenities in property images and generates natural language descriptions. Given one or more images of a property (e.g. an Airbnb listing), the system detects what's present in each room, stores the results, and produces a readable property summary.
 
-### Amenity Detection
-The system is designed to detect/identify a comprehensive range of amenities in an image. It is primarily organised by room type, although this is still not a perfect solution. Currently the organisation looks like:
+---
 
-1. **Kitchen**: refrigerator, oven, microwave, etc.
-2. **Living Room**: sofa, TV, coffee table, etc.
-3. **Bedroom**: bed, wardrobe, desk, etc.
-4. **Bathroom**: toilet, shower, sink, etc.
-5. **Outdoor**: patio, pool, garden, etc.
-6. **Common**: wifi, heating, security features, etc.
+## What it does
 
-One can refer to core/amenity_schema.py which has the **AMENITY_SCHEMA** object detailing out the individual amenities.
+1. **Detects amenities** in a property image using a vision-language model (VLM)
+2. **Structures results** by room type (kitchen, bedroom, bathroom, etc.)
+3. **Stores everything** in both SQLite (queryable) and CSV (portable) formats
+4. **Generates a description** of the property based on what was detected
+5. **Exposes results** via a Streamlit web app and a FastAPI REST API
 
-### Technical Overview
-The task is to detect, store and then generate a natural language description.
+---
 
-1. **Visual Recognition/Detection**: Use of ([Llava](https://huggingface.co/docs/transformers/en/model_doc/llava)) model from hugging face.
-2. **Data Storage**: Store whatever results the detection algorithm comes out with in both CSV and SQLite format for easy access and future analysis.
-3. **Description Generation**: Use of the same ([Llava](https://huggingface.co/docs/transformers/en/model_doc/llava)) model to generate natural language.
-4. **Configuration**: Use of ([Hydra](https://hydra.cc/docs/intro/)) for flexible configuration management.
+## Amenity Schema
 
-**NOTE**: The inference is currently slow and for detection, one could use pre-trained YOLO/DETR/ models and then finetune them on specific data from ([OpenImageDataset](https://storage.googleapis.com/openimages/web/index.html)).
+Amenities are organised by room type. The full list lives in `core/amenity_schema.py` (`AMENITY_SCHEMA`). The current categories are:
 
-## System Design
+| Room | Example amenities |
+|---|---|
+| Kitchen | refrigerator, oven, microwave, dishwasher, coffee_maker |
+| Living Room | sofa, tv, fireplace, projector, gaming_console |
+| Bedroom | bed, wardrobe, desk, air_conditioner, lamp |
+| Bathroom | toilet, shower, bathtub, hair_dryer, washing_machine |
+| Outdoor | patio, pool, garden, bbq_grill, parking_space |
+| Common | wifi, heating, smoke_detector, elevator |
 
-### Architecture
-The system mainly comprises of 5 components
+---
 
-1. **Amenity Schema**: Component responsible to handle the schema the model should follow.
-2. **AmenityDetector**: Handles amenity detection and description generation using LLaVA.
-3. **AmenityDataManager**: Manages storage, retrieval and summarization of the amenities stored.
-4. **PropertyAmenitySystem**: This system processes image/directories, detects amenities and then store the information.
-5. **Web App**: Use of streamlit to create and deploy an app.
+## Architecture
 
-**NOTE**: There is also an API based component that is responsible in wrapping the model and making it accessible via FastAPI. But this component needs some more work to be done.
+```
+main.py  ──▶  PropertyAmenitySystem
+                  │
+                  ├── AmenityDetector  (VLM calls + response parsing)
+                  │       └── LlavaModel  (currently: LLaVA 1.5-7B via HuggingFace)
+                  │
+                  └── AmenityDataManager  (SQLite + CSV storage)
 
-### Technical Choices
+FastAPI (api/)  ──▶  PropertyAmenitySystem  (same pipeline, HTTP interface)
+Streamlit (streamlit/)  ──▶  direct inference or via FastAPI
+```
 
-#### VLM
-1. Selected LlaVA as the core VLM due to its strong performance on vision-language tasks
-2. Model provides both amenity detection and description generation capabilities
-3. ([Git](https://huggingface.co/docs/transformers/en/model_doc/git)), ([InstructBlip](https://huggingface.co/docs/transformers/model_doc/instructblip)) and ([Blip2](https://huggingface.co/docs/transformers/en/model_doc/blip-2)) were also tested out. But either the quality of generation or their inference time served as a disadvantage when comparing with Llava.
+> **Planned (Phase 1)**: LlavaModel will be replaced by a pluggable `VLMClient` abstraction
+> supporting Qwen2.5-VL-7B, LLaMA 3.2 Vision, and Gemini 2.0 Flash interchangeably via Ollama
+> or the Google Generative AI API. See `SPEC.md` for the full roadmap.
 
-#### Data Storage
-**SQLite**: Provides a structured, queryable database for complex analyses
-**CSV**: Offers easy export and compatibility with other tools
+---
 
 ## Getting Started
 
-To get started with the project, follow these steps:
+### Prerequisites
 
-### Cloning the Repository
+- Python 3.11+
+- [`uv`](https://github.com/astral-sh/uv) — fast Python package manager
+- A CUDA-capable GPU is strongly recommended (LLaVA is slow on CPU)
 
-First, clone the repository to your local machine using the following command:
+### Installation
 
 ```bash
+# 1. Clone the repo
 git clone https://github.com/Shrinidhibhat87/amenity_detector.git
 cd amenity_detector
+
+# 2. Install uv if you don't have it
+curl -Ls https://astral.sh/uv/install.sh | sh
+
+# 3. Install runtime dependencies
+uv sync
+
+# 4. (Optional) Install dev tools — linting, type checking, tests
+uv sync --group dev
 ```
 
-### Setting Up a Python Virtual Environment
+### Configuration
 
-Create a Python virtual environment to manage dependencies:
+Copy the environment template and fill in any values you need:
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+cp .env.example .env
 ```
 
-### Installing Required Libraries
+Edit `config/config.yaml` to set your image input path and output directory before running.
 
-Install the required libraries from the `requirements.txt` file:
+### Running
+
+**Command-line pipeline:**
+```bash
+uv run python main.py
+```
+
+**Streamlit web app:**
+```bash
+uv run streamlit run streamlit/app.py
+```
+
+**FastAPI server:**
+```bash
+uv run uvicorn api.service:app --reload
+```
+
+---
+
+## Development
+
+### Running checks locally
 
 ```bash
-pip install -r requirements.txt
+# Lint
+uv run ruff check .
+
+# Format
+uv run ruff format .
+
+# Type check
+uv run mypy . --ignore-missing-imports
+
+# Unit tests
+uv run pytest tests/unit/ -v
 ```
 
-### Running the project
+### Pre-commit hooks
 
-There are two ways to run this project:
+Install once to run checks automatically before every commit:
 
-### 1. Command Line Approach
+```bash
+uv run pre-commit install
+```
 
-1. First, modify the path to where your images are located in the `config/config.yaml` file. Also change the output location to where the data can be stored.
-2. Run the main script:
-    ```
-    python main.py
-    ```
+### CI
 
-### 2. Web-based Approach using Streamlit
+GitHub Actions runs on every push and pull request to `main`:
+- `ruff check` — linting
+- `ruff format --check` — formatting
+- `mypy` — static type checking
+- `pytest tests/unit/` — unit tests
 
-1. Launch the Streamlit application:
-    ```
-    streamlit run streamlit/app.py
-    ```
-2. Through the web interface, you can upload an image and the application will automatically generate a description for it.
+Heavy dependencies (torch, transformers) are excluded from CI; only dev packages are installed in the runner.
 
-## Limitations and Future Enhancements
+---
 
-### Current Limitations
+## Data Storage
 
-1. **Slow Inference**: Processing takes approximately 20 seconds per image even with GPU acceleration
-2. **Incomplete Detection**: The system cannot reliably detect all amenities present in images
-3. **Accuracy Issues**: Some detected amenities are questionable or incorrectly identified
-4. **Implicit Amenities**: Cannot detect amenities that aren't visually present (e.g., WiFi, heating systems)
+Results are written to the directory configured in `config/config.yaml → output.directory`:
 
-### Planned Enhancements
+| File | Format | Purpose |
+|---|---|---|
+| `amenities.csv` | CSV | One row per image; one column per amenity (0/1) |
+| `amenities.db` | SQLite | Relational store for complex queries |
 
-1. **Optimized Detection Models**: Implement fine-tuned, lightweight models like YOLO/DETR for faster inference, then use language models to describe the detected objects
-2. **Retrieval-Augmented Generation**: Incorporate RAG systems that can reference property documentation to enhance descriptions with non-visual amenities
-3. **API Infrastructure**: Complete FastAPI integration to provide production-ready endpoints for system access
-4. **Agentic AI Implementation**: Develop conversational workflows that allow the model to query and analyze the SQLite database for more comprehensive property insights
+---
 
-## TODO
+## Current Limitations
 
-- [ ] Improve documentation by adding screenshot image of the app working
-- [ ] Add pyproject.toml file and .pre-commit.yaml file for better project management.
-- [ ] Write up pseudo code as to where the RAG based pipeline would integrate
-- [ ] Optimize model inference time by implementing batching
-- [ ] Implement FastAPI endpoints for production use
-- [ ] Create a Docker container for easy deployment
+- **Inference speed**: ~20 seconds per image even with GPU (LLaVA 7B at 4-bit quantisation)
+- **Implicit amenities**: Cannot detect things that aren't visible — e.g. WiFi, heating
+- **Single model**: Only LLaVA is wired up today; the VLM abstraction layer is coming in Phase 1
+- **No cloud storage**: Images and results are local only; cloud migration is planned for Phase 5
+
+---
+
+## Roadmap
+
+See [`SPEC.md`](SPEC.md) for the detailed phased plan. In brief:
+
+| Phase | Goal |
+|---|---|
+| 0 ✅ | Cleanup: uv migration, pre-commit, CI, type safety |
+| 1 | VLM abstraction: Ollama (Qwen2.5-VL, LLaMA 3.2 Vision) + Gemini 2.0 Flash |
+| 2 | PostgreSQL + FastAPI backend with proper REST endpoints |
+| 3 | Gradio frontend replacing Streamlit |
+| 4 | Observability: structured logging, Prometheus metrics |
+| 5 | Cloud migration: managed DB, object storage, container deployment |
