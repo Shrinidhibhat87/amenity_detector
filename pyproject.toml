@@ -12,42 +12,58 @@ dependencies = [
     "hydra-core>=1.3.0",
     "omegaconf>=2.3.0",
 
-    # Deep learning — LLaVA model loading and inference (model/llava.py)
-    "torch>=2.4.0",
-    "transformers>=4.37.0",
-    "accelerate>=1.6.0",      # Enables device_map="auto" in from_pretrained()
-    "bitsandbytes>=0.45.0",   # Enables load_in_4bit=True for quantized loading
-
-    # Image handling — PIL used in core/amenity_detector.py and model/llava.py
+    # Image handling — PIL used throughout the pipeline
     "Pillow>=9.5.0",
+
+    # Database layer — SQLAlchemy ORM + Alembic migrations + PostgreSQL driver
+    "sqlalchemy>=2.0.0",      # ORM: defines Property, Image, DetectedAmenity tables
+    "alembic>=1.13.0",        # Schema migrations (run: alembic upgrade head)
+    "psycopg2-binary>=2.9.0", # PostgreSQL adapter for SQLAlchemy
+
+    # API layer — FastAPI + Uvicorn ASGI server (api/)
+    "fastapi>=0.115.9",
+    "uvicorn>=0.34.0",
+    "python-multipart>=0.0.9",  # Required by FastAPI to accept file uploads (multipart/form-data)
+
+    # VLM clients — Ollama uses plain HTTP (requests), Gemini uses Google SDK
+    "requests>=2.31.0",           # HTTP client for Ollama REST API calls
+    "google-genai>=1.0.0",        # Gemini 2.0 Flash API (free tier: 1500 req/day). New SDK replacing google-generativeai.
 
     # Data handling
     "pandas>=2.0.0",          # DataFrames in amenity_data_manager and amenity_system
     "numpy>=1.25.0",          # Array ops in dataloader and utilities/retriever
     "scikit-learn>=1.4.0",    # cosine_similarity in utilities/retriever.py
 
-    # API layer — FastAPI + Uvicorn ASGI server (api/)
-    "fastapi>=0.115.9",
-    "uvicorn>=0.34.0",
-
-    # Web UI (will be replaced by Gradio in Phase 3, kept for now)
+    # Web UI (Streamlit kept until Phase 3 Gradio migration)
     "streamlit>=1.40.0",
-    "requests>=2.31.0",       # streamlit/app.py calls the FastAPI backend
 
     # Visualisation — used in dataloader/sunrgb_d.py for debug plots
     "matplotlib>=3.8.0",
 ]
 
+# ── Optional: local HuggingFace model inference (legacy LLaVA, not needed with Ollama) ──────
+# Install with: uv sync --group local-gpu
+# These are heavy (~5GB download) and require a CUDA-capable GPU.
+[dependency-groups]
+local-gpu = [
+    "torch>=2.4.0",
+    "transformers>=4.37.0",
+    "accelerate>=1.6.0",      # Enables device_map="auto" in from_pretrained()
+    "bitsandbytes>=0.45.0",   # Enables load_in_4bit=True for quantized loading
+]
+
 # ── Development dependencies ──────────────────────────────────────────────────
 # Install with: uv sync --group dev
-[dependency-groups]
 dev = [
     "ruff>=0.4.0",        # Linting + formatting (replaces flake8, black, isort)
     "mypy>=1.10.0",       # Static type checker
     "pre-commit>=3.7.0",  # Git hook manager — runs ruff + mypy before each commit
     "pytest>=8.0.0",      # Test runner
-    "types-requests",     # Type stubs for the `requests` library (used by streamlit/app.py)
+    "httpx>=0.27.0",      # HTTP client used by FastAPI TestClient for integration tests
+    "pytest-asyncio>=0.23.0",  # Async test support for FastAPI async endpoints
+    "types-requests",     # Type stubs for the `requests` library
     "pandas-stubs",       # Type stubs for pandas
+    "sqlalchemy[mypy]",   # mypy plugin for SQLAlchemy mapped_column type inference
 ]
 
 # ── uv project settings ───────────────────────────────────────────────────────
@@ -78,7 +94,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 # Tell ruff which packages belong to THIS project so imports are sorted correctly.
-known-first-party = ["core", "model", "api", "utilities", "dataloader"]
+known-first-party = ["core", "model", "models", "api", "db", "utilities", "dataloader"]
 
 # ── Mypy: static type checking ────────────────────────────────────────────────
 [tool.mypy]
@@ -86,6 +102,9 @@ python_version = "3.11"
 warn_return_any = true       # Warn when a function returns Any without being explicit
 warn_unused_configs = true   # Catch typos in mypy config
 ignore_missing_imports = true  # torch, transformers etc. have incomplete stubs — skip them
+
+# SQLAlchemy mypy plugin — enables type inference for mapped_column() and Mapped[]
+plugins = ["sqlalchemy.ext.mypy.plugin"]
 
 # ── Pytest: test runner configuration ────────────────────────────────────────
 [tool.pytest.ini_options]

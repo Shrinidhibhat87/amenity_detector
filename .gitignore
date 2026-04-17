@@ -44,6 +44,26 @@ old_project/
 
 # ── Images and plots ──────────────────────────────────────────────────────────
 plots/
+storage/          # Uploaded images (runtime data, not for git)
+
+# ── Database files (local dev SQLite fallback) ────────────────────────────────
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# ── Alembic ───────────────────────────────────────────────────────────────────
+# The versions/ directory IS committed (migration scripts belong in git)
+# But generated SQL dumps are not
+*.sql.dump
+
+# ── Project documentation (internal only, not for public GitHub) ─────────────
+SPEC.md
+ARCHITECTURE.md
+resources/
+
+# ── Claude Code (AI assistant) ────────────────────────────────────────────────
+.claude/
 
 # ── IDE settings ──────────────────────────────────────────────────────────────
 .vscode/
