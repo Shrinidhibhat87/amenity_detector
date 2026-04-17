@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 #   - Code after `yield` runs at shutdown
 # The `app` argument lets us store state on `app.state` for dependency injection.
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """

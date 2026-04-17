@@ -138,9 +138,7 @@ class AmenityDataManager:
             self.db.add(record)
             records.append(record)
 
-        self.logger.info(
-            "Saved %d amenity records for image_id=%s", len(records), image_id
-        )
+        self.logger.info("Saved %d amenity records for image_id=%s", len(records), image_id)
         return records
 
     def update_property_description(self, property_id: str, description: str) -> Property:
@@ -196,12 +194,7 @@ class AmenityDataManager:
         Returns:
             List of Property ORM objects.
         """
-        stmt = (
-            select(Property)
-            .order_by(Property.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-        )
+        stmt = select(Property).order_by(Property.created_at.desc()).offset(offset).limit(limit)
         return list(self.db.scalars(stmt))
 
     def search_properties_by_amenities(self, amenity_names: list[str]) -> list[Property]:
@@ -239,11 +232,7 @@ class AmenityDataManager:
             for name in amenity_names
         ]
 
-        stmt = (
-            select(Property)
-            .where(and_(*conditions))
-            .order_by(Property.created_at.desc())
-        )
+        stmt = select(Property).where(and_(*conditions)).order_by(Property.created_at.desc())
         return list(self.db.scalars(stmt))
 
     # ── DELETE ──────────────────────────────────────────────────────────────────

@@ -116,7 +116,9 @@ class PropertyAmenitySystem:
         """
         self.logger.info(
             "Processing upload: property=%r, model=%s, images=%d",
-            property_name, model_name, len(images),
+            property_name,
+            model_name,
+            len(images),
         )
 
         # Step 1: Create the Property record (gets a UUID assigned via flush)

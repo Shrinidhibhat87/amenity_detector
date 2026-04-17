@@ -16,7 +16,6 @@ Test coverage:
   - GET  /health                     — liveness check
 """
 
-
 from fastapi.testclient import TestClient
 
 
@@ -31,9 +30,7 @@ class TestHealthEndpoint:
 
 
 class TestUploadEndpoint:
-    def test_upload_single_image_success(
-        self, client: TestClient, sample_image_bytes: bytes
-    ):
+    def test_upload_single_image_success(self, client: TestClient, sample_image_bytes: bytes):
         """Uploading one valid image should create a property and return 201."""
         response = client.post(
             "/api/v1/properties/upload",
@@ -56,9 +53,7 @@ class TestUploadEndpoint:
         assert prop["model_used"] == "fake-model"
         assert len(prop["images"]) == 1
 
-    def test_upload_creates_amenity_records(
-        self, client: TestClient, sample_image_bytes: bytes
-    ):
+    def test_upload_creates_amenity_records(self, client: TestClient, sample_image_bytes: bytes):
         """Detection results should be present in the response's amenities list."""
         response = client.post(
             "/api/v1/properties/upload",
@@ -87,9 +82,7 @@ class TestUploadEndpoint:
         )
         assert response.status_code == 422  # FastAPI validation: files is required
 
-    def test_upload_unknown_model_returns_400(
-        self, client: TestClient, sample_image_bytes: bytes
-    ):
+    def test_upload_unknown_model_returns_400(self, client: TestClient, sample_image_bytes: bytes):
         """Requesting an unregistered model should return 400."""
         response = client.post(
             "/api/v1/properties/upload",
@@ -149,9 +142,7 @@ class TestListEndpoint:
         names = [p["name"] for p in data]
         assert "Listed Property" in names
 
-    def test_list_pagination_limit(
-        self, client: TestClient, sample_image_bytes: bytes
-    ):
+    def test_list_pagination_limit(self, client: TestClient, sample_image_bytes: bytes):
         """The limit parameter should cap the number of results returned."""
         # Upload 3 properties
         for i in range(3):
@@ -167,9 +158,7 @@ class TestListEndpoint:
 
 
 class TestDetailEndpoint:
-    def test_get_existing_property_returns_200(
-        self, client: TestClient, sample_image_bytes: bytes
-    ):
+    def test_get_existing_property_returns_200(self, client: TestClient, sample_image_bytes: bytes):
         """Getting a property by its ID should return full details."""
         upload_resp = client.post(
             "/api/v1/properties/upload",
@@ -192,9 +181,7 @@ class TestDetailEndpoint:
 
 
 class TestSearchEndpoint:
-    def test_search_finds_matching_property(
-        self, client: TestClient, sample_image_bytes: bytes
-    ):
+    def test_search_finds_matching_property(self, client: TestClient, sample_image_bytes: bytes):
         """Searching for an amenity that was detected should return the property."""
         # The fake VLM always returns refrigerator=True
         client.post(
@@ -267,9 +254,7 @@ class TestDeleteEndpoint:
 
     def test_delete_nonexistent_property_returns_404(self, client: TestClient):
         """Trying to delete a property that doesn't exist should return 404."""
-        response = client.delete(
-            "/api/v1/properties/00000000-0000-0000-0000-000000000000"
-        )
+        response = client.delete("/api/v1/properties/00000000-0000-0000-0000-000000000000")
         assert response.status_code == 404
 
 

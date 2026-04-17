@@ -25,7 +25,7 @@ class ModelInfo(BaseModel):
     """Information about a single VLM."""
 
     name: str
-    available: bool   # True = registered and reachable; False = not configured/offline
+    available: bool  # True = registered and reachable; False = not configured/offline
     description: str  # Human-readable explanation for the UI
 
 

@@ -67,8 +67,9 @@ class TestModelRegistryFromEnv:
         monkeypatch.setenv("OLLAMA_BASE_URL", "http://fake-ollama:11434")
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
-        with patch("models.registry.OllamaClient") as MockOllama, patch(
-            "models.registry.GeminiClient", side_effect=ValueError("no key")
+        with (
+            patch("models.registry.OllamaClient") as MockOllama,
+            patch("models.registry.GeminiClient", side_effect=ValueError("no key")),
         ):
             MockOllama.return_value = _make_fake_client("qwen2.5vl:7b")
             ModelRegistry.from_env()
@@ -81,9 +82,10 @@ class TestModelRegistryFromEnv:
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         monkeypatch.setenv("OLLAMA_BASE_URL", "http://fake-ollama:11434")
 
-        with patch("models.registry.OllamaClient") as MockOllama, patch(
-            "models.registry.GeminiClient"
-        ) as MockGemini:
+        with (
+            patch("models.registry.OllamaClient") as MockOllama,
+            patch("models.registry.GeminiClient") as MockGemini,
+        ):
             MockOllama.return_value = _make_fake_client("ollama-model")
             MockGemini.return_value = _make_fake_client("gemini-2.0-flash")
             ModelRegistry.from_env()
@@ -97,8 +99,9 @@ class TestModelRegistryFromEnv:
         """
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
-        with patch("models.registry.OllamaClient") as MockOllama, patch(
-            "models.registry.GeminiClient", side_effect=ValueError("no key")
+        with (
+            patch("models.registry.OllamaClient") as MockOllama,
+            patch("models.registry.GeminiClient", side_effect=ValueError("no key")),
         ):
             MockOllama.return_value = _make_fake_client("ollama")
             # This should NOT raise
@@ -113,9 +116,10 @@ class TestModelRegistryFromEnv:
         """
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
 
-        with patch("models.registry.OllamaClient", side_effect=Exception("bad init")), patch(
-            "models.registry.GeminiClient"
-        ) as MockGemini:
+        with (
+            patch("models.registry.OllamaClient", side_effect=Exception("bad init")),
+            patch("models.registry.GeminiClient") as MockGemini,
+        ):
             MockGemini.return_value = _make_fake_client("gemini-2.0-flash")
             registry = ModelRegistry.from_env()
 

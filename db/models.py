@@ -46,9 +46,7 @@ class Property(Base):
 
     # Primary key — we generate UUID in Python so we know the ID before the DB INSERT.
     # This makes it easy to associate images and amenities before committing.
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
 
     # Human-readable label provided by the user at upload time (e.g., "Frankfurt House 1")
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -96,9 +94,7 @@ class PropertyImage(Base):
 
     __tablename__ = "images"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
 
     # Foreign key links this image to its parent property
     property_id: Mapped[str] = mapped_column(
@@ -133,17 +129,13 @@ class DetectedAmenity(Base):
 
     __tablename__ = "detected_amenities"
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
 
     # Which property and image this detection belongs to
     property_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("properties.id"), nullable=False
     )
-    image_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("images.id"), nullable=False
-    )
+    image_id: Mapped[str] = mapped_column(String(36), ForeignKey("images.id"), nullable=False)
 
     # e.g. "refrigerator", "bathtub", "wifi" — taken directly from amenity_schema
     amenity_name: Mapped[str] = mapped_column(String(200), nullable=False)

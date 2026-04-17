@@ -36,9 +36,7 @@ logger = logging.getLogger(__name__)
 # Read the database URL from the environment.
 # Default to SQLite for development convenience (no Docker needed for a quick test).
 # SQLite works for single-developer use; PostgreSQL is required for any multi-user setup.
-DATABASE_URL: str = os.getenv(
-    "DATABASE_URL", "sqlite:///./amenity_detector.db"
-)
+DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./amenity_detector.db")
 
 # SQLite needs check_same_thread=False because FastAPI may handle a request across
 # different threads. PostgreSQL doesn't need this flag so we only add it conditionally.

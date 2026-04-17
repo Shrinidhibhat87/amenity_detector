@@ -96,18 +96,18 @@ def mock_vlm_client() -> VLMClient:
 
     The response simulates a kitchen image with refrigerator and oven detected.
     """
-    fake_response_json = json.dumps({
-        "refrigerator": True,
-        "oven": True,
-        "dishwasher": False,
-        "microwave": False,
-    })
+    fake_response_json = json.dumps(
+        {
+            "refrigerator": True,
+            "oven": True,
+            "dishwasher": False,
+            "microwave": False,
+        }
+    )
 
     client = MagicMock(spec=VLMClient)
     type(client).model_name = property(lambda self: "fake-model")
-    client.generate.return_value = VLMResponse(
-        raw_text=fake_response_json, model_name="fake-model"
-    )
+    client.generate.return_value = VLMResponse(raw_text=fake_response_json, model_name="fake-model")
     return client
 
 
@@ -134,10 +134,12 @@ def test_app(db_session: Session, mock_registry: ModelRegistry, tmp_path):
 
     # Override the model registry with our fake registry
     from api.dependencies import get_model_registry
+
     app.dependency_overrides[get_model_registry] = lambda: mock_registry
 
     # Override image storage to a pytest temp directory (cleaned up automatically)
     from api.dependencies import get_image_storage_dir
+
     app.dependency_overrides[get_image_storage_dir] = lambda: tmp_path / "images"
 
     # Store the registry on app.state (the health check and startup code expect it)

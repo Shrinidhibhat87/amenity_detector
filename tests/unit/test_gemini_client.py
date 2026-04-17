@@ -90,9 +90,7 @@ class TestGeminiClientGenerate:
         assert result.raw_text == '{"pool": true, "gym": false}'
         assert result.model_name == GEMINI_MODEL_ID
 
-    def test_passes_image_and_prompt_to_sdk(
-        self, client: GeminiClient, fake_image: PILImage.Image
-    ):
+    def test_passes_image_and_prompt_to_sdk(self, client: GeminiClient, fake_image: PILImage.Image):
         """The SDK's generate_content() should receive both the image and the prompt."""
         mock_api_response = MagicMock()
         mock_api_response.text = "ok"

@@ -88,9 +88,7 @@ class TestGenerate:
         assert result.raw_text == '{"refrigerator": true, "oven": false}'
         assert result.model_name == "qwen2.5vl:7b"
 
-    def test_sends_correct_model_in_payload(
-        self, client: OllamaClient, fake_image: PILImage.Image
-    ):
+    def test_sends_correct_model_in_payload(self, client: OllamaClient, fake_image: PILImage.Image):
         """The model name in the request payload must match the client's model."""
         mock_response = MagicMock()
         mock_response.json.return_value = {"message": {"content": "response"}}
@@ -133,9 +131,7 @@ class TestGenerate:
             with pytest.raises(RuntimeError, match="Cannot connect to Ollama"):
                 client.generate(fake_image, "test")
 
-    def test_timeout_raises_runtime_error(
-        self, client: OllamaClient, fake_image: PILImage.Image
-    ):
+    def test_timeout_raises_runtime_error(self, client: OllamaClient, fake_image: PILImage.Image):
         """A timeout should raise RuntimeError with a descriptive message."""
         import requests
 

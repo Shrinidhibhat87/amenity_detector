@@ -150,14 +150,10 @@ class AmenityDetector:
             result: dict[str, bool] = json.loads(json_str)
             return result
         except json.JSONDecodeError as e:
-            self.logger.warning(
-                "JSON parse failed (%s). Raw text: %s", e, text[:300]
-            )
+            self.logger.warning("JSON parse failed (%s). Raw text: %s", e, text[:300])
             return {}
 
-    def detect_from_image(
-        self, image: Image
-    ) -> tuple[dict[str, dict[str, bool]], dict[str, bool]]:
+    def detect_from_image(self, image: Image) -> tuple[dict[str, dict[str, bool]], dict[str, bool]]:
         """
         Run amenity detection on a PIL Image.
 
@@ -197,15 +193,12 @@ class AmenityDetector:
         amenities_by_room: dict[str, dict[str, bool]] = {}
         for room_type, amenity_list in self.amenity_schema.items():
             amenities_by_room[room_type] = {
-                amenity: flat_amenities.get(amenity, False)
-                for amenity in amenity_list
+                amenity: flat_amenities.get(amenity, False) for amenity in amenity_list
             }
 
         return amenities_by_room, flat_amenities
 
-    def generate_description(
-        self, image: Image, detected_amenities: dict[str, bool]
-    ) -> str:
+    def generate_description(self, image: Image, detected_amenities: dict[str, bool]) -> str:
         """
         Generate a natural-language description for the property image.
 
