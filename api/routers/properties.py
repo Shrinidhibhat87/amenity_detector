@@ -1,0 +1,308 @@
+"""
+Properties router — handles all /api/v1/properties/* endpoints.
+
+Endpoints:
+  POST   /api/v1/properties/upload          Upload images + trigger detection
+  GET    /api/v1/properties/                List all properties (paginated)
+  GET    /api/v1/properties/search          Filter by required amenities
+  GET    /api/v1/properties/{id}            Full property details
+  DELETE /api/v1/properties/{id}            Remove a property
+
+Design notes:
+  - Routes are thin: they validate input, call the service layer, return responses.
+  - All DB work goes through AmenityDataManager (in core/amenity_data_manager.py).
+  - All VLM + file work goes through PropertyAmenitySystem (in core/amenity_system.py).
+  - Pydantic response schemas are in api/schemas.py.
+"""
+
+import io
+import logging
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from PIL import Image
+from sqlalchemy.orm import Session
+
+from api.dependencies import get_image_storage_dir, get_model_registry
+from api.schemas import (
+    PropertyDetailResponse,
+    PropertyImageResponse,
+    PropertySummaryResponse,
+    UploadResponse,
+)
+from core.amenity_data_manager import AmenityDataManager
+from core.amenity_system import PropertyAmenitySystem
+from db.session import get_db
+from models.registry import ModelRegistry
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/v1/properties", tags=["properties"])
+
+# Allowed image MIME types — reject anything else at the boundary
+_ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+
+@router.post("/upload", response_model=UploadResponse, status_code=201)
+def upload_property(
+    files: list[UploadFile] = File(..., description="One or more property images"),
+    name: str = Form(..., description="Human-readable property name (e.g. 'Frankfurt House 1')"),
+    model_name: str = Form(
+        ..., description="VLM to use for detection (e.g. 'qwen2.5vl:7b' or 'gemini-2.0-flash')"
+    ),
+    extra_info: str | None = Form(
+        None, description="Optional notes (location, number of rooms, etc.)"
+    ),
+    db: Session = Depends(get_db),
+    registry: ModelRegistry = Depends(get_model_registry),
+    storage_dir: Path = Depends(get_image_storage_dir),
+) -> UploadResponse:
+    """
+    Upload property images, run amenity detection, and store results.
+
+    This is the primary endpoint of the whole application. It:
+      1. Validates the uploaded files (image format check)
+      2. Looks up the requested VLM in the registry
+      3. Delegates the full pipeline to PropertyAmenitySystem
+      4. Returns the newly created property with all detection results
+
+    Args:
+        files:      One or more image files (JPEG, PNG, or WebP).
+        name:       Property name shown in the Browse tab.
+        model_name: Which VLM to use. Must be one of the registered models.
+        extra_info: Optional free-text context about the property.
+        db:         Database session (injected per-request).
+        registry:   Model registry (injected once at startup).
+        storage_dir:Directory for saving images (from IMAGE_STORAGE_DIR env var).
+
+    Returns:
+        UploadResponse containing the property ID and full detection results.
+
+    Raises:
+        400: If no files uploaded, a file is not an image, or the model is unknown.
+        500: If VLM inference or DB write fails.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one image file is required.")
+
+    # Validate all files before doing any heavy work
+    for f in files:
+        if f.content_type not in _ALLOWED_CONTENT_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"File '{f.filename}' has unsupported type '{f.content_type}'. "
+                    f"Allowed: {sorted(_ALLOWED_CONTENT_TYPES)}"
+                ),
+            )
+
+    # Resolve the requested VLM client — fail fast if unavailable
+    try:
+        vlm_client = registry.get(model_name)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    # Read all files into memory as PIL Images
+    pil_images: list[Image.Image] = []
+    filenames: list[str] = []
+    for upload in files:
+        raw = upload.file.read()
+        try:
+            pil_images.append(Image.open(io.BytesIO(raw)).convert("RGB"))
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not decode image '{upload.filename}': {e}",
+            ) from e
+        filenames.append(upload.filename or f"image_{len(filenames)}.jpg")
+
+    # Run the full pipeline
+    try:
+        system = PropertyAmenitySystem(
+            vlm_client=vlm_client,
+            db=db,
+            image_storage_dir=storage_dir,
+        )
+        prop = system.process_upload(
+            images=pil_images,
+            filenames=filenames,
+            property_name=name,
+            model_name=model_name,
+            extra_info=extra_info,
+        )
+    except Exception as e:
+        logger.exception("Upload pipeline failed for property '%s'", name)
+        raise HTTPException(status_code=500, detail=f"Processing failed: {e}") from e
+
+    # Build the detail response, mapping ORM objects → Pydantic schemas
+    detail = _build_detail_response(prop)
+    return UploadResponse(
+        property_id=prop.id,
+        message=f"Property '{prop.name}' processed successfully.",
+        property=detail,
+    )
+
+
+@router.get("/", response_model=list[PropertySummaryResponse])
+def list_properties(
+    offset: int = Query(0, ge=0, description="Number of items to skip"),
+    limit: int = Query(20, ge=1, le=100, description="Max items to return"),
+    db: Session = Depends(get_db),
+) -> list[PropertySummaryResponse]:
+    """
+    List all properties (newest first), with pagination.
+
+    Args:
+        offset: Skip this many results (useful for page 2+).
+        limit:  Return at most this many results per page.
+        db:     Database session.
+
+    Returns:
+        List of PropertySummaryResponse objects.
+    """
+    manager = AmenityDataManager(db)
+    properties = manager.list_properties(offset=offset, limit=limit)
+    return [
+        PropertySummaryResponse(
+            **{k: v for k, v in prop.__dict__.items() if not k.startswith("_")},
+            image_count=len(prop.images),
+        )
+        for prop in properties
+    ]
+
+
+@router.get("/search", response_model=list[PropertySummaryResponse])
+def search_properties(
+    amenities: str = Query(
+        ...,
+        description="Comma-separated list of required amenities (e.g. 'wifi,pool,gym')",
+    ),
+    db: Session = Depends(get_db),
+) -> list[PropertySummaryResponse]:
+    """
+    Search for properties that have ALL the specified amenities detected.
+
+    Args:
+        amenities: Comma-separated amenity names (case-sensitive, must match schema).
+        db:        Database session.
+
+    Returns:
+        List of matching properties as summary objects.
+
+    Example:
+        GET /api/v1/properties/search?amenities=refrigerator,oven
+    """
+    amenity_list = [a.strip() for a in amenities.split(",") if a.strip()]
+    if not amenity_list:
+        raise HTTPException(status_code=400, detail="No amenity names provided.")
+
+    manager = AmenityDataManager(db)
+    properties = manager.search_properties_by_amenities(amenity_list)
+    return [
+        PropertySummaryResponse(
+            **{k: v for k, v in prop.__dict__.items() if not k.startswith("_")},
+            image_count=len(prop.images),
+        )
+        for prop in properties
+    ]
+
+
+@router.get("/{property_id}", response_model=PropertyDetailResponse)
+def get_property(
+    property_id: str,
+    db: Session = Depends(get_db),
+) -> PropertyDetailResponse:
+    """
+    Get full details for a single property, including all images and amenities.
+
+    Args:
+        property_id: UUID of the property.
+        db:          Database session.
+
+    Returns:
+        PropertyDetailResponse with images and nested amenity results.
+
+    Raises:
+        404: If no property with the given ID exists.
+    """
+    manager = AmenityDataManager(db)
+    prop = manager.get_property(property_id)
+    if prop is None:
+        raise HTTPException(status_code=404, detail=f"Property '{property_id}' not found.")
+    return _build_detail_response(prop)
+
+
+@router.delete("/{property_id}", status_code=204)
+def delete_property(
+    property_id: str,
+    db: Session = Depends(get_db),
+) -> None:
+    """
+    Delete a property and all its images and detected amenities.
+
+    Note: This does NOT delete the image files from disk — only the DB records.
+    Image cleanup from the file store is a future enhancement (Phase 4).
+
+    Args:
+        property_id: UUID of the property to delete.
+        db:          Database session.
+
+    Raises:
+        404: If no property with the given ID exists.
+    """
+    manager = AmenityDataManager(db)
+    deleted = manager.delete_property(property_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Property '{property_id}' not found.")
+    db.commit()
+
+
+# ── Helper ───────────────────────────────────────────────────────────────────
+
+
+def _build_detail_response(prop: object) -> PropertyDetailResponse:
+    """
+    Convert a Property ORM object into a PropertyDetailResponse Pydantic model.
+
+    We do this manually (rather than relying on from_attributes=True alone) because
+    we need to map the ORM's `images` relationship into the nested response structure,
+    including the amenities nested under each image.
+
+    Args:
+        prop: A Property ORM instance with `images` and `images[*].amenities` loaded.
+
+    Returns:
+        A fully populated PropertyDetailResponse.
+    """
+    from db.models import Property as PropertyModel  # avoid circular import at module level
+
+    assert isinstance(prop, PropertyModel)
+
+    image_responses = [
+        PropertyImageResponse(
+            id=img.id,
+            file_path=img.file_path,
+            room_type=img.room_type,
+            amenities=[
+                {
+                    "id": a.id,
+                    "amenity_name": a.amenity_name,
+                    "room_type": a.room_type,
+                    "is_present": a.is_present,
+                    "confidence": a.confidence,
+                }
+                for a in img.amenities
+            ],
+        )
+        for img in prop.images
+    ]
+
+    return PropertyDetailResponse(
+        id=prop.id,
+        name=prop.name,
+        description=prop.description,
+        model_used=prop.model_used,
+        extra_info=prop.extra_info,
+        created_at=prop.created_at,
+        images=image_responses,
+    )
