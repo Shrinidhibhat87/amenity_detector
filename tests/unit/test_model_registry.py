@@ -17,8 +17,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from models.base import VLMClient, VLMResponse
-from models.registry import ModelRegistry, SUPPORTED_MODELS
+from models.base import VLMClient
+from models.registry import SUPPORTED_MODELS, ModelRegistry
 
 
 def _make_fake_client(name: str) -> VLMClient:
@@ -71,7 +71,7 @@ class TestModelRegistryFromEnv:
             "models.registry.GeminiClient", side_effect=ValueError("no key")
         ):
             MockOllama.return_value = _make_fake_client("qwen2.5vl:7b")
-            registry = ModelRegistry.from_env()
+            ModelRegistry.from_env()
 
         # Both Ollama models should have been attempted
         assert MockOllama.call_count == 2
@@ -86,7 +86,7 @@ class TestModelRegistryFromEnv:
         ) as MockGemini:
             MockOllama.return_value = _make_fake_client("ollama-model")
             MockGemini.return_value = _make_fake_client("gemini-2.0-flash")
-            registry = ModelRegistry.from_env()
+            ModelRegistry.from_env()
 
         MockGemini.assert_called_once()
 

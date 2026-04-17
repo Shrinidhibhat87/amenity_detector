@@ -10,11 +10,11 @@ They verify:
   5. Default values (UUID, timestamp) are auto-populated
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from db.models import Base, DetectedAmenity, Property, PropertyImage
 
@@ -68,7 +68,6 @@ class TestPropertyModel:
 
     def test_created_at_is_set_automatically(self, db_session: Session):
         """created_at should be populated without us setting it explicitly."""
-        before = datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC for comparison
         prop = Property(name="Timestamp Test")
         db_session.add(prop)
         db_session.commit()

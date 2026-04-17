@@ -25,8 +25,7 @@ Why this pattern?
 import os
 from pathlib import Path
 
-from fastapi import Depends, HTTPException, Request
-from sqlalchemy.orm import Session
+from fastapi import HTTPException, Request
 
 from db.session import get_db
 from models.registry import ModelRegistry

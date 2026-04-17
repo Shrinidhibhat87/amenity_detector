@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from api.dependencies import get_model_registry
-from models.registry import ModelRegistry, SUPPORTED_MODELS
+from models.registry import SUPPORTED_MODELS, ModelRegistry
 
 logger = logging.getLogger(__name__)
 

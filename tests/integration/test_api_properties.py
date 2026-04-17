@@ -16,11 +16,8 @@ Test coverage:
   - GET  /health                     — liveness check
 """
 
-import io
 
-import pytest
 from fastapi.testclient import TestClient
-from PIL import Image as PILImage
 
 
 class TestHealthEndpoint:

@@ -8,9 +8,10 @@ These tests verify:
   4. A concrete subclass that forgets an abstract method raises TypeError
 """
 
+from unittest.mock import MagicMock
+
 import pytest
 from PIL.Image import Image
-from unittest.mock import MagicMock
 
 from models.base import VLMClient, VLMResponse
 

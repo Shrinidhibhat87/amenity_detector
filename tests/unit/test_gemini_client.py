@@ -18,7 +18,7 @@ import pytest
 from PIL import Image as PILImage
 
 from models.base import VLMResponse
-from models.gemini_client import GeminiClient, GEMINI_MODEL_ID
+from models.gemini_client import GEMINI_MODEL_ID, GeminiClient
 
 
 @pytest.fixture
