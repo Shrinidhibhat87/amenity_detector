@@ -82,7 +82,7 @@ class TestGeminiClientGenerate:
         """A successful API call should return a VLMResponse with the model's text."""
         mock_api_response = MagicMock()
         mock_api_response.text = '{"pool": true, "gym": false}'
-        client._client.models.generate_content.return_value = mock_api_response
+        client._client.models.generate_content.return_value = mock_api_response  # type: ignore[attr-defined]
 
         result = client.generate(fake_image, "List visible amenities as JSON.")
 
@@ -94,11 +94,11 @@ class TestGeminiClientGenerate:
         """The SDK's generate_content() should receive both the image and the prompt."""
         mock_api_response = MagicMock()
         mock_api_response.text = "ok"
-        client._client.models.generate_content.return_value = mock_api_response
+        client._client.models.generate_content.return_value = mock_api_response  # type: ignore[attr-defined]
 
         client.generate(fake_image, "describe the room")
 
-        call_kwargs = client._client.models.generate_content.call_args
+        call_kwargs = client._client.models.generate_content.call_args  # type: ignore[attr-defined]
         contents = call_kwargs.kwargs["contents"]
         # The contents list should contain [image, prompt_text]
         assert fake_image in contents
@@ -111,7 +111,7 @@ class TestGeminiClientGenerate:
         Any exception from the Gemini SDK should be caught and re-raised as
         RuntimeError so callers don't need to import Google's exception classes.
         """
-        client._client.models.generate_content.side_effect = Exception("quota exceeded")
+        client._client.models.generate_content.side_effect = Exception("quota exceeded")  # type: ignore[attr-defined]
 
         with pytest.raises(RuntimeError, match="Gemini API call failed"):
             client.generate(fake_image, "test")

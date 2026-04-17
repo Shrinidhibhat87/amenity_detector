@@ -10,6 +10,7 @@ They verify:
   5. Default values (UUID, timestamp) are auto-populated
 """
 
+from collections.abc import Generator
 from datetime import datetime
 
 import pytest
@@ -20,7 +21,7 @@ from db.models import Base, DetectedAmenity, Property, PropertyImage
 
 
 @pytest.fixture(scope="function")
-def db_session() -> Session:
+def db_session() -> Generator[Session, None, None]:
     """
     Create a fresh in-memory SQLite database for each test function.
 
@@ -99,6 +100,7 @@ class TestPropertyModel:
         db_session.commit()
 
         retrieved = db_session.get(Property, prop.id)
+        assert retrieved is not None
         assert retrieved.description == "A lovely flat"
         assert retrieved.model_used == "gemini-2.0-flash"
         assert retrieved.extra_info == "Near the park, 2 bedrooms"

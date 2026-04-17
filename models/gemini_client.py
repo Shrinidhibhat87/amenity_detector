@@ -89,9 +89,9 @@ class GeminiClient(VLMClient):
             # The new SDK: client.models.generate_content() with a mixed-content list
             response = self._client.models.generate_content(
                 model=GEMINI_MODEL_ID,
-                contents=[image, prompt],
+                contents=[image, prompt],  # type: ignore[arg-type]
             )
-            raw_text: str = response.text
+            raw_text: str = response.text or ""
         except Exception as e:
             # Catch all SDK exceptions and re-raise as RuntimeError so callers
             # don't need to import Google's exception hierarchy.

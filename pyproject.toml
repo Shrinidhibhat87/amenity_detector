@@ -106,6 +106,13 @@ ignore_missing_imports = true  # torch, transformers etc. have incomplete stubs 
 # SQLAlchemy mypy plugin — enables type inference for mapped_column() and Mapped[]
 plugins = ["sqlalchemy.ext.mypy.plugin"]
 
+# Exclude legacy entry-points that pre-date the FastAPI rework.
+# main.py uses the old Hydra-based PropertyAmenitySystem interface which no
+# longer exists; streamlit/app.py is the old UI layer. Neither is part of
+# the current production code path and both would require significant
+# refactoring to satisfy mypy against the new API.
+exclude = ["^main\\.py$", "^streamlit/"]
+
 # ── Pytest: test runner configuration ────────────────────────────────────────
 [tool.pytest.ini_options]
 testpaths = ["tests"]        # Only look for tests inside the tests/ directory

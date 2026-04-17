@@ -48,7 +48,7 @@ class OllamaClient(VLMClient):
         """
         self._model = model
         self._base_url = (
-            base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+            base_url or os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434"
         ).rstrip("/")
 
     @property

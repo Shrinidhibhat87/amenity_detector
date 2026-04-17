@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from api.dependencies import get_image_storage_dir, get_model_registry
 from api.schemas import (
+    DetectedAmenityResponse,
     PropertyDetailResponse,
     PropertyImageResponse,
     PropertySummaryResponse,
@@ -284,13 +285,13 @@ def _build_detail_response(prop: object) -> PropertyDetailResponse:
             file_path=img.file_path,
             room_type=img.room_type,
             amenities=[
-                {
-                    "id": a.id,
-                    "amenity_name": a.amenity_name,
-                    "room_type": a.room_type,
-                    "is_present": a.is_present,
-                    "confidence": a.confidence,
-                }
+                DetectedAmenityResponse(
+                    id=a.id,
+                    amenity_name=a.amenity_name,
+                    room_type=a.room_type,
+                    is_present=a.is_present,
+                    confidence=a.confidence,
+                )
                 for a in img.amenities
             ],
         )
