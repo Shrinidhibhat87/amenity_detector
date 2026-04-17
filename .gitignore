@@ -1,25 +1,74 @@
-# Hydra log files and checkpoints
+# ── Python cache ─────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# ── Virtual environments (never commit these) ─────────────────────────────────
+venv/
+.venv/
+amenity_detector/      # old venv that was previously here
+
+# ── uv ───────────────────────────────────────────────────────────────────────
+# uv.lock IS committed (ensures reproducible installs across machines)
+.uv/
+
+# ── Build artifacts ───────────────────────────────────────────────────────────
+dist/
+build/
+*.egg-info/
+
+# ── Secrets (NEVER commit these) ─────────────────────────────────────────────
+.env
+*.env
+
+# ── Tool caches ───────────────────────────────────────────────────────────────
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# ── Hydra outputs ─────────────────────────────────────────────────────────────
 *.log
 *.hydra
+outputs/          # Hydra also writes here by default
 
-# All the cache files
-*__pycache__/
-
-# Specific model checkpoints
+# ── Model checkpoints (large files, not for git) ──────────────────────────────
 model/GitForCausalLM/
 model/Salesforce_blip2_flan_t5_xl/
 model/LlavaModel/
 model/InstructBlip/
 
-# Old project files, which I did not want to delete
+# ── Old project files ─────────────────────────────────────────────────────────
 old_project/
 
-# Images and plots
+# ── Images and plots ──────────────────────────────────────────────────────────
 plots/
+storage/          # Uploaded images (runtime data, not for git)
 
-# Outputs directory
-outputs/
+# ── Database files (local dev SQLite fallback) ────────────────────────────────
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
 
-# VS code settings
+# ── Alembic ───────────────────────────────────────────────────────────────────
+# The versions/ directory IS committed (migration scripts belong in git)
+# But generated SQL dumps are not
+*.sql.dump
+
+# ── Project documentation (internal only, not for public GitHub) ─────────────
+SPEC.md
+ARCHITECTURE.md
+resources/
+
+# ── Claude Code (AI assistant) ────────────────────────────────────────────────
+.claude/
+
+# ── Local developer guides (personal, not for shared repo) ───────────────────
+GIT_CONVENTIONS.md
+
+# ── IDE settings ──────────────────────────────────────────────────────────────
 .vscode/
+.idea/
 

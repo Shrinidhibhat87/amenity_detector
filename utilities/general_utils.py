@@ -1,12 +1,13 @@
 """Python files that contain some general utility functions."""
-import os
+
 import json
+import os
 
 
 # Helper functions to load json file
 def load_json(json_path: str):
     try:
-        with open(json_path, 'r') as f:
+        with open(json_path) as f:
             data = json.load(f)
         return data
 
@@ -14,7 +15,8 @@ def load_json(json_path: str):
         print(f"Error decoding JSON: {e}")
         return None
 
-#Helper function to save the plot.
+
+# Helper function to save the plot.
 def save_plot(fig, folder_name):
     """
     Saves the plot with the name of the folder/file.

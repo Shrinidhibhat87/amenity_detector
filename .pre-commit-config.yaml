@@ -1,0 +1,38 @@
+# Pre-commit hook configuration
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-commit hooks run automatically before every `git commit`.
+# They catch issues early — before code ever reaches CI — saving time.
+#
+# Setup (one-time):
+#   uv run pre-commit install
+#
+# Run manually on all files:
+#   uv run pre-commit run --all-files
+# ─────────────────────────────────────────────────────────────────────────────
+
+repos:
+  # ── Ruff: linting and formatting ──────────────────────────────────────────
+  # Ruff is extremely fast (written in Rust) and replaces flake8 + black + isort.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      # 1. Linter: checks for bugs, bad patterns, and import ordering.
+      #    --fix automatically corrects safe issues (e.g. unused imports, sort order).
+      - id: ruff
+        args: [--fix]
+
+      # 2. Formatter: enforces consistent code style (similar to black).
+      - id: ruff-format
+
+  # ── Mypy: static type checking ────────────────────────────────────────────
+  # Mypy reads type annotations (e.g. `def foo(x: int) -> str`) and catches
+  # type mismatches before they become runtime errors.
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        # Provide type stubs for libraries that don't ship their own.
+        # Add more here if mypy complains about missing stubs.
+        additional_dependencies:
+          - types-requests   # stubs for the `requests` library
+          - pandas-stubs     # stubs for pandas

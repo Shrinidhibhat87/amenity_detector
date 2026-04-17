@@ -1,125 +1,270 @@
-# Amenity Detection and Description System
-This system automatically indentifies and detects amenities in property images. Additionally the system also generates a natural language description of the image. It uses a vision-language model, currently we have ([Llava](https://llava-vl.github.io/)), but this can easily be extended further.
+# Amenity Detector
 
-## Project Scope
+An end-to-end pipeline that automatically identifies amenities in property images (e.g. Airbnb listings), stores results in PostgreSQL, and exposes a REST API. Built as a learning project for real-world AI Engineering practices.
 
-### Amenity Detection
-The system is designed to detect/identify a comprehensive range of amenities in an image. It is primarily organised by room type, although this is still not a perfect solution. Currently the organisation looks like:
+**Status**: Phases 0–2 complete. FastAPI backend + PostgreSQL + VLM abstraction (Ollama / Gemini) running via Docker Compose. Gradio UI (Phase 3) is next.
 
-1. **Kitchen**: refrigerator, oven, microwave, etc.
-2. **Living Room**: sofa, TV, coffee table, etc.
-3. **Bedroom**: bed, wardrobe, desk, etc.
-4. **Bathroom**: toilet, shower, sink, etc.
-5. **Outdoor**: patio, pool, garden, etc.
-6. **Common**: wifi, heating, security features, etc.
+---
 
-One can refer to core/amenity_schema.py which has the **AMENITY_SCHEMA** object detailing out the individual amenities.
+## What it does
 
-### Technical Overview
-The task is to detect, store and then generate a natural language description.
+1. Accept one or more property images via a REST API upload
+2. Run amenity detection using a Vision-Language Model (Qwen2.5-VL-7B, LLaMA 3.2 Vision, or Gemini 2.0 Flash)
+3. Detect which amenities are visible per image (refrigerator, pool, sofa, etc.)
+4. Store property, image, and detection records in PostgreSQL
+5. Generate a natural-language description of the property
+6. Allow browsing and searching properties by detected amenities
 
-1. **Visual Recognition/Detection**: Use of ([Llava](https://huggingface.co/docs/transformers/en/model_doc/llava)) model from hugging face.
-2. **Data Storage**: Store whatever results the detection algorithm comes out with in both CSV and SQLite format for easy access and future analysis.
-3. **Description Generation**: Use of the same ([Llava](https://huggingface.co/docs/transformers/en/model_doc/llava)) model to generate natural language.
-4. **Configuration**: Use of ([Hydra](https://hydra.cc/docs/intro/)) for flexible configuration management.
+---
 
-**NOTE**: The inference is currently slow and for detection, one could use pre-trained YOLO/DETR/ models and then finetune them on specific data from ([OpenImageDataset](https://storage.googleapis.com/openimages/web/index.html)).
+## Amenity Schema
 
-## System Design
+Amenities are organised by room type and defined in `core/amenity_schema.py`:
 
-### Architecture
-The system mainly comprises of 5 components
+| Room | Example amenities |
+|---|---|
+| Kitchen | refrigerator, oven, microwave, dishwasher, coffee_maker |
+| Living Room | sofa, tv, fireplace, projector, gaming_console |
+| Bedroom | bed, wardrobe, desk, air_conditioner, lamp |
+| Bathroom | toilet, shower, bathtub, hair_dryer, washing_machine |
+| Outdoor | patio, pool, garden, bbq_grill, parking_space |
+| Common | wifi, heating, smoke_detector, elevator |
 
-1. **Amenity Schema**: Component responsible to handle the schema the model should follow.
-2. **AmenityDetector**: Handles amenity detection and description generation using LLaVA.
-3. **AmenityDataManager**: Manages storage, retrieval and summarization of the amenities stored.
-4. **PropertyAmenitySystem**: This system processes image/directories, detects amenities and then store the information.
-5. **Web App**: Use of streamlit to create and deploy an app.
+---
 
-**NOTE**: There is also an API based component that is responsible in wrapping the model and making it accessible via FastAPI. But this component needs some more work to be done.
+## Quick Start (Docker Compose)
 
-### Technical Choices
+### Prerequisites
 
-#### VLM
-1. Selected LlaVA as the core VLM due to its strong performance on vision-language tasks
-2. Model provides both amenity detection and description generation capabilities
-3. ([Git](https://huggingface.co/docs/transformers/en/model_doc/git)), ([InstructBlip](https://huggingface.co/docs/transformers/model_doc/instructblip)) and ([Blip2](https://huggingface.co/docs/transformers/en/model_doc/blip-2)) were also tested out. But either the quality of generation or their inference time served as a disadvantage when comparing with Llava.
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose v2)
+- [uv](https://github.com/astral-sh/uv) — for running tests and local dev outside Docker
+- At least one of:
+  - **Gemini API key** (free, 1500 req/day) — easiest to get started
+  - **Ollama** installed locally — for local GPU inference
 
-#### Data Storage
-**SQLite**: Provides a structured, queryable database for complex analyses
-**CSV**: Offers easy export and compatibility with other tools
+### 1. Get a Gemini API key (free)
 
-## Getting Started
+1. Go to [https://aistudio.google.com/](https://aistudio.google.com/)
+2. Click **Get API key** → **Create API key**
+3. Copy the key — you'll need it in step 3
 
-To get started with the project, follow these steps:
+### 2. (Optional) Install Ollama for local GPU inference
 
-### Cloning the Repository
-
-First, clone the repository to your local machine using the following command:
+If you want to run Qwen2.5-VL-7B or LLaMA 3.2 Vision locally on your GPU:
 
 ```bash
-git clone https://github.com/Shrinidhibhat87/amenity_detector.git
-cd amenity_detector
+# Install Ollama (Linux / WSL2)
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull the models (choose one or both)
+# Qwen2.5-VL-7B: ~5GB download, fits in 6GB VRAM with 4-bit quantisation
+ollama pull qwen2.5vl:7b
+
+# LLaMA 3.2 Vision 11B: ~6.5GB — slightly over 6GB VRAM, Ollama offloads to CPU (slower)
+ollama pull llama3.2-vision:11b
+
+# Start the Ollama server (runs on http://localhost:11434)
+ollama serve
 ```
 
-### Setting Up a Python Virtual Environment
+> **Note on GPU**: The models above work on a GTX 1660 Ti (6GB VRAM). Qwen2.5-VL-7B fits
+> comfortably. LLaMA 3.2 Vision 11B may be slow due to partial CPU offloading — use it to
+> experience the VRAM vs speed trade-off firsthand.
 
-Create a Python virtual environment to manage dependencies:
+### 3. Configure environment
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+cp .env.example .env
 ```
 
-### Installing Required Libraries
-
-Install the required libraries from the `requirements.txt` file:
+Edit `.env` and fill in your values:
 
 ```bash
-pip install -r requirements.txt
+# Required for Gemini (leave empty if using Ollama only)
+GEMINI_API_KEY=your_key_here
+
+# If Ollama is running natively on your machine (outside Docker):
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+
+# Database — the defaults below match docker-compose.yml, no change needed
+DATABASE_URL=postgresql://amenity_user:amenity_pass@localhost:5432/amenity_db
+POSTGRES_USER=amenity_user
+POSTGRES_PASSWORD=amenity_pass
+POSTGRES_DB=amenity_db
+
+# Where uploaded images are stored (Docker mounts this as a volume)
+IMAGE_STORAGE_DIR=./storage/images
 ```
 
-### Running the project
+### 4. Start the stack
 
-There are two ways to run this project:
+```bash
+docker compose up
+```
 
-### 1. Command Line Approach
+This starts:
+- **PostgreSQL 16** on port `5432` (data persists in a Docker volume)
+- **FastAPI backend** on port `8000`
 
-1. First, modify the path to where your images are located in the `config/config.yaml` file. Also change the output location to where the data can be stored.
-2. Run the main script:
-    ```
-    python main.py
-    ```
+First run takes a minute to build the Docker image. Subsequent starts are instant.
 
-### 2. Web-based Approach using Streamlit
+### 5. Verify it's working
 
-1. Launch the Streamlit application:
-    ```
-    streamlit run streamlit/app.py
-    ```
-2. Through the web interface, you can upload an image and the application will automatically generate a description for it.
+Open the interactive API docs in your browser:
 
-## Limitations and Future Enhancements
+```
+http://localhost:8000/docs
+```
 
-### Current Limitations
+Or run a quick health check:
 
-1. **Slow Inference**: Processing takes approximately 20 seconds per image even with GPU acceleration
-2. **Incomplete Detection**: The system cannot reliably detect all amenities present in images
-3. **Accuracy Issues**: Some detected amenities are questionable or incorrectly identified
-4. **Implicit Amenities**: Cannot detect amenities that aren't visually present (e.g., WiFi, heating systems)
+```bash
+curl http://localhost:8000/health
+# {"status":"ok","database":"ok","version":"1.0.0"}
+```
 
-### Planned Enhancements
+---
 
-1. **Optimized Detection Models**: Implement fine-tuned, lightweight models like YOLO/DETR for faster inference, then use language models to describe the detected objects
-2. **Retrieval-Augmented Generation**: Incorporate RAG systems that can reference property documentation to enhance descriptions with non-visual amenities
-3. **API Infrastructure**: Complete FastAPI integration to provide production-ready endpoints for system access
-4. **Agentic AI Implementation**: Develop conversational workflows that allow the model to query and analyze the SQLite database for more comprehensive property insights
+## API Endpoints
 
-## TODO
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/properties/upload` | Upload images, detect amenities, store results |
+| `GET` | `/api/v1/properties/` | List all properties (paginated) |
+| `GET` | `/api/v1/properties/{id}` | Full property details (images + amenities) |
+| `GET` | `/api/v1/properties/search?amenities=pool,wifi` | Filter by required amenities |
+| `DELETE` | `/api/v1/properties/{id}` | Remove a property |
+| `GET` | `/api/v1/models/` | List available VLMs and their status |
+| `GET` | `/health` | Liveness check |
 
-- [ ] Improve documentation by adding screenshot image of the app working
-- [ ] Add pyproject.toml file and .pre-commit.yaml file for better project management.
-- [ ] Write up pseudo code as to where the RAG based pipeline would integrate
-- [ ] Optimize model inference time by implementing batching
-- [ ] Implement FastAPI endpoints for production use
-- [ ] Create a Docker container for easy deployment
+### Example: upload a property
+
+```bash
+curl -X POST http://localhost:8000/api/v1/properties/upload \
+  -F "name=Frankfurt House 1" \
+  -F "model_name=gemini-2.0-flash" \
+  -F "extra_info=2-bed flat near the city centre" \
+  -F "files=@/path/to/kitchen.jpg" \
+  -F "files=@/path/to/bedroom.jpg"
+```
+
+---
+
+## Development
+
+### Install dependencies locally (for tests and linting)
+
+```bash
+uv sync --group dev
+```
+
+### Run tests
+
+```bash
+# Unit tests only (fast, no Docker needed)
+uv run pytest tests/unit/ -v
+
+# Integration tests (uses in-memory SQLite, no Docker needed)
+uv run pytest tests/integration/ -v
+
+# Full suite
+uv run pytest tests/ -v
+```
+
+To run integration tests against a real PostgreSQL (must be running):
+
+```bash
+TEST_DATABASE_URL=postgresql://amenity_user:amenity_pass@localhost:5432/amenity_db \
+  uv run pytest tests/integration/ -v
+```
+
+### Run checks
+
+```bash
+uv run ruff check .          # linting
+uv run ruff format .         # formatting
+uv run mypy . --ignore-missing-imports  # type checking
+```
+
+### Pre-commit hooks
+
+```bash
+uv run pre-commit install    # run once; ruff + mypy run before every commit after this
+```
+
+### Database migrations
+
+```bash
+# After changing db/models.py, generate a new migration:
+uv run alembic revision --autogenerate -m "describe your change"
+
+# Apply all pending migrations (also runs automatically in the Docker container):
+uv run alembic upgrade head
+```
+
+---
+
+## Project Structure
+
+```
+amenity_detector/
+├── api/                    # FastAPI app
+│   ├── main.py             # App entrypoint, lifespan, router registration
+│   ├── dependencies.py     # Dependency injection (DB session, model registry)
+│   ├── schemas.py          # Pydantic request/response models
+│   └── routers/
+│       ├── properties.py   # /api/v1/properties/* endpoints
+│       └── models.py       # /api/v1/models/ endpoint
+│
+├── core/                   # Business logic
+│   ├── amenity_schema.py   # Amenity definitions by room type
+│   ├── amenity_detector.py # Prompt engineering + VLM response parsing
+│   ├── amenity_data_manager.py  # SQLAlchemy CRUD operations
+│   └── amenity_system.py   # Upload pipeline orchestrator
+│
+├── models/                 # VLM abstraction layer
+│   ├── base.py             # VLMClient ABC + VLMResponse dataclass
+│   ├── ollama_client.py    # Ollama REST API client
+│   ├── gemini_client.py    # Google Gemini API client
+│   └── registry.py         # ModelRegistry (name → client mapping)
+│
+├── db/                     # Database layer
+│   ├── models.py           # SQLAlchemy ORM: Property, PropertyImage, DetectedAmenity
+│   ├── session.py          # Engine, SessionLocal, get_db()
+│   └── migrations/         # Alembic migration scripts
+│
+├── tests/
+│   ├── unit/               # Fast tests, no external dependencies
+│   └── integration/        # API + DB tests (in-memory SQLite)
+│
+├── docker/
+│   ├── Dockerfile.api      # FastAPI container
+│   └── Dockerfile.ui       # Gradio container (Phase 3)
+│
+├── docker-compose.yml      # PostgreSQL + API services
+├── pyproject.toml          # uv dependencies + tool config
+└── .env.example            # Environment variable template
+```
+
+---
+
+## Roadmap
+
+| Phase | Status | Goal |
+|---|---|---|
+| 0 | ✅ Done | Cleanup: uv, pre-commit, CI, type safety |
+| 1 | ✅ Done | VLM abstraction: OllamaClient, GeminiClient, ModelRegistry |
+| 2 | ✅ Done | PostgreSQL + FastAPI REST API + Docker Compose |
+| 3 | 🔜 Next | Gradio frontend: Upload tab + Browse tab |
+| 4 | Planned | Observability: structured logging, Prometheus metrics |
+| 5 | Planned | Cloud migration: managed DB, object storage, CD pipeline |
+
+---
+
+## CI
+
+GitHub Actions runs on every push / pull request to `main`:
+- `ruff check` — linting
+- `ruff format --check` — formatting
+- `mypy` — static type checking
+- `pytest tests/unit/ tests/integration/` — all tests (no GPU or Docker needed)

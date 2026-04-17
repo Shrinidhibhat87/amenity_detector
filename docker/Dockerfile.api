@@ -1,0 +1,70 @@
+# ── Dockerfile for the FastAPI backend ──────────────────────────────────────
+#
+# Why we use uv instead of pip:
+#   uv installs from uv.lock (the lockfile) which guarantees the exact same
+#   package versions in every build — no "works on my machine" issues.
+#
+# Why multi-stage build:
+#   Stage 1 (builder) installs all dependencies including build tools.
+#   Stage 2 (runtime) copies only the installed packages — no build tools,
+#   making the final image smaller and reducing the attack surface.
+#
+# Usage:
+#   Build:  docker build -f docker/Dockerfile.api -t amenity-api .
+#   Run:    docker run -p 8000:8000 --env-file .env amenity-api
+
+# ── Stage 1: install dependencies ────────────────────────────────────────────
+FROM python:3.11-slim AS builder
+
+# Install uv — the fast Python package manager
+# We pin the uv version for reproducibility (update this when you want to upgrade uv)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Copy dependency manifests first (before source code).
+# Docker caches layers: if pyproject.toml and uv.lock haven't changed, the
+# expensive `uv sync` step is skipped on subsequent builds.
+COPY pyproject.toml uv.lock ./
+
+# Install only runtime dependencies (not dev tools like ruff, mypy, pytest).
+# --no-install-project: don't install the project itself yet (just deps).
+# --frozen: use the exact versions from uv.lock (no resolution step).
+RUN uv sync --frozen --no-install-project --no-group dev --no-group local-gpu
+
+# ── Stage 2: runtime image ────────────────────────────────────────────────────
+FROM python:3.11-slim AS runtime
+
+WORKDIR /app
+
+# Copy the installed virtual environment from the builder stage
+COPY --from=builder /app/.venv /app/.venv
+
+# Add the venv to PATH so we can call python/uvicorn directly
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Tell Python to look in /app for local modules (api/, db/, core/, models/, etc.).
+# This is needed because the project is NOT installed as a package (package = false
+# in pyproject.toml). Without this, `from db.session import ...` fails when uvicorn
+# is invoked as an executable rather than via `python -m uvicorn`.
+ENV PYTHONPATH="/app"
+
+# Copy the application source code
+# (This layer changes on every code change, which is fine — deps layer above is cached)
+COPY api/       ./api/
+COPY core/      ./core/
+COPY models/    ./models/
+COPY db/        ./db/
+COPY config/    ./config/
+COPY alembic.ini ./
+
+# Create the image storage directory — the volume mount point in Docker Compose
+RUN mkdir -p /app/storage/images
+
+# Expose the API port (must match docker-compose.yml)
+EXPOSE 8000
+
+# Run database migrations first, then start the server.
+# We use `sh -c` so we can chain two commands with &&.
+# `alembic upgrade head` is idempotent — safe to run every startup.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000"]

@@ -1,0 +1,25 @@
+# ── Dockerfile for the Gradio UI ─────────────────────────────────────────────
+#
+# Placeholder — the Gradio UI is built in Phase 3.
+# This file exists to keep the Docker Compose config consistent so we can
+# reference it without changing docker-compose.yml when Phase 3 lands.
+#
+# The structure will mirror Dockerfile.api once ui/app.py is implemented.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-install-project --no-group dev --no-group local-gpu
+
+ENV PATH="/app/.venv/bin:$PATH"
+
+COPY ui/ ./ui/
+COPY api/ ./api/
+
+EXPOSE 7860
+
+CMD ["python", "-m", "ui.app"]
