@@ -65,6 +65,9 @@ resources/
 # ── Claude Code (AI assistant) ────────────────────────────────────────────────
 .claude/
 
+# ── Local developer guides (personal, not for shared repo) ───────────────────
+GIT_CONVENTIONS.md
+
 # ── IDE settings ──────────────────────────────────────────────────────────────
 .vscode/
 .idea/
