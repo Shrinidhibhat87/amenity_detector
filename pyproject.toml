@@ -34,8 +34,18 @@ dependencies = [
     "numpy>=1.25.0",          # Array ops in dataloader and utilities/retriever
     "scikit-learn>=1.4.0",    # cosine_similarity in utilities/retriever.py
 
-    # Web UI (Streamlit kept until Phase 3 Gradio migration)
-    "streamlit>=1.40.0",
+    # Web UI — Gradio replaces Streamlit in Phase 3
+    # Gradio is purpose-built for ML demos: multimodal inputs, clean Python API,
+    # and it talks to our FastAPI backend via HTTP.
+    "gradio>=4.0.0",
+
+    # Observability — Phase 4
+    # python-json-logger formats all log output as structured JSON so log aggregators
+    # (e.g., Loki, CloudWatch) can index individual fields.
+    "python-json-logger>=2.0.0",
+    # prometheus-fastapi-instrumentator adds a /metrics endpoint to FastAPI with
+    # standard HTTP request/response histograms — scraped by Prometheus.
+    "prometheus-fastapi-instrumentator>=6.0.0",
 
     # Visualisation — used in dataloader/sunrgb_d.py for debug plots
     "matplotlib>=3.8.0",
@@ -94,7 +104,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 # Tell ruff which packages belong to THIS project so imports are sorted correctly.
-known-first-party = ["core", "model", "models", "api", "db", "utilities", "dataloader"]
+known-first-party = ["core", "model", "models", "api", "db", "ui", "utilities", "dataloader"]
 
 # ── Mypy: static type checking ────────────────────────────────────────────────
 [tool.mypy]

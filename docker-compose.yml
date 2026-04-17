@@ -1,9 +1,11 @@
 # Docker Compose configuration for the Amenity Detector stack.
 #
 # Services defined here:
-#   db       — PostgreSQL 16 database
-#   api      — FastAPI backend (port 8000)
-#   ui       — Gradio frontend (port 7860) — Phase 3, commented out until then
+#   db         — PostgreSQL 16 database
+#   api        — FastAPI backend (port 8000)
+#   ui         — Gradio frontend (port 7860)        — Phase 3
+#   prometheus — Metrics scraper (port 9090)         — Phase 4
+#   grafana    — Dashboards for Prometheus (port 3000) — Phase 4
 #
 # How to use:
 #   Start everything:      docker compose up
@@ -12,10 +14,12 @@
 #   Destroy data too:      docker compose down -v    ← WARNING: deletes the database volume
 #   Tail API logs:         docker compose logs -f api
 #   Open a psql shell:     docker compose exec db psql -U amenity_user amenity_db
+#   Open Grafana:          http://localhost:3000  (admin / admin, change on first login)
 #
 # Volumes:
-#   postgres_data  — persists the database between docker compose restarts
-#   image_storage  — persists uploaded images between API container restarts
+#   postgres_data   — persists the database between docker compose restarts
+#   image_storage   — persists uploaded images between API container restarts
+#   grafana_data    — persists Grafana dashboards and data sources
 
 services:
 
@@ -69,19 +73,63 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Gradio UI (Phase 3 — uncomment when ui/app.py is implemented) ───────────
-  # ui:
-  #   build:
-  #     context: .
-  #     dockerfile: docker/Dockerfile.ui
-  #   restart: unless-stopped
-  #   ports:
-  #     - "7860:7860"
-  #   environment:
-  #     API_BASE_URL: http://api:8000
-  #   depends_on:
-  #     api:
-  #       condition: service_healthy
+  # ── Gradio UI (Phase 3) ───────────────────────────────────────────────────────
+  ui:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ui
+    restart: unless-stopped
+    ports:
+      - "7860:7860"
+    environment:
+      # Points to the FastAPI backend — "api" resolves to that service via Docker DNS
+      API_BASE_URL: http://api:8000
+      GRADIO_PORT: "7860"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:7860/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Prometheus (Phase 4 — metrics scraper) ──────────────────────────────────
+  # Prometheus scrapes the FastAPI /metrics endpoint every 15 seconds and stores
+  # time-series data for Grafana dashboards.
+  # Access: http://localhost:9090
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      # Mount our custom scrape config so Prometheus knows which targets to scrape
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - api
+
+  # ── Grafana (Phase 4 — dashboards) ─────────────────────────────────────────
+  # Grafana visualises the Prometheus metrics.
+  # Access: http://localhost:3000  (default credentials: admin / admin)
+  # On first login you will be prompted to change the password.
+  # To add a Prometheus data source: Settings → Data Sources → Add → Prometheus
+  #   URL: http://prometheus:9090
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin  # Change this in production!
+    volumes:
+      # Persist dashboards and data source configs across restarts
+      - grafana_data:/var/lib/grafana
+      # Auto-provision the Prometheus data source so you don't have to add it manually
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
 
 # ── Named volumes ─────────────────────────────────────────────────────────────
 volumes:
@@ -89,3 +137,5 @@ volumes:
     # Docker manages this volume; data persists across `docker compose down` (without -v)
   image_storage:
     # Uploaded images; also persists across restarts
+  grafana_data:
+    # Grafana dashboard configs and data sources; persists across restarts

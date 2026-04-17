@@ -152,7 +152,13 @@ class PropertyAmenitySystem:
             )
 
             # Step 2c: Run amenity detection
-            amenities_by_room, flat_amenities = self.detector.detect_from_image(pil_image)
+            # detect_from_image returns three dicts:
+            #   amenities_by_room — results organised by room type (for room inference)
+            #   flat_amenities    — simple bool dict for all amenities
+            #   flat_confidences  — model confidence per amenity (0.0–1.0, Phase 4)
+            amenities_by_room, flat_amenities, flat_confidences = self.detector.detect_from_image(
+                pil_image
+            )
             self.logger.info(
                 "Detected %d present amenities in %s",
                 sum(1 for v in flat_amenities.values() if v),
@@ -163,12 +169,13 @@ class PropertyAmenitySystem:
             detected_room = _infer_room_type(amenities_by_room)
             img_record.room_type = detected_room
 
-            # Step 2d: Save detection results to the database
+            # Step 2d: Save detection results to the database (with confidence scores)
             self.data_manager.save_amenities(
                 property_id=prop.id,
                 image_id=img_record.id,
                 amenities=flat_amenities,
                 room_type=detected_room,
+                confidences=flat_confidences,
             )
 
             # Track for description generation
