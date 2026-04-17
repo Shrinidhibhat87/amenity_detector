@@ -246,15 +246,17 @@ Two tabs:
 ### Phase 1 — VLM Abstraction + Ollama Setup
 **Goal**: Replace the hard-coded LLaVA model with a pluggable VLM layer.
 
-- [ ] Install and configure Ollama locally (outside Docker for now)
-- [ ] Pull quantized models: `ollama pull qwen2.5vl:7b` and `ollama pull llama3.2-vision:11b`
-- [ ] Implement `models/base.py` — `VLMClient` ABC + `VLMResponse` dataclass
-- [ ] Implement `models/ollama_client.py` — wraps Ollama REST API
-- [ ] Implement `models/gemini_client.py` — wraps `google-generativeai` SDK
-- [ ] Implement `ModelRegistry` — maps model name string → client instance
-- [ ] Update `core/amenity_detector.py` to use `VLMClient` instead of direct HuggingFace calls
-- [ ] Write unit tests for the abstraction layer (mock HTTP calls)
-- [ ] Manual test: run detection with all 3 models, compare output quality
+- [x] Start to ignore SPEC.md file and also resources folder using .gitignore
+- [x] Cleanup the .gitignore file and make sure only the required files/folders are mentioned
+- [ ] Install and configure Ollama locally (outside Docker for now) — manual step, see README
+- [ ] Pull quantized models: `ollama pull qwen2.5vl:7b` and `ollama pull llama3.2-vision:11b` — manual step
+- [x] Implement `models/base.py` — `VLMClient` ABC + `VLMResponse` dataclass
+- [x] Implement `models/ollama_client.py` — wraps Ollama REST API
+- [x] Implement `models/gemini_client.py` — wraps `google-generativeai` SDK
+- [x] Implement `ModelRegistry` — maps model name string → client instance
+- [x] Update `core/amenity_detector.py` to use `VLMClient` instead of direct HuggingFace calls
+- [x] Write unit tests for the abstraction layer (mock HTTP calls)
+- [ ] Manual test: run detection with all 3 models, compare output quality — deferred to Phase 3
 
 **Deliverable**: `python main.py` works with any of the 3 models via a config change.
 
@@ -263,14 +265,14 @@ Two tabs:
 ### Phase 2 — Database + FastAPI Backend
 **Goal**: Replace SQLite with PostgreSQL and expose a proper REST API.
 
-- [ ] Set up `docker-compose.yml` with PostgreSQL service
-- [ ] Set up SQLAlchemy + Alembic for ORM and migrations
-- [ ] Define ORM models (`db/models.py`): `Property`, `Image`, `DetectedAmenity`
-- [ ] Implement `db/session.py` — connection factory using env-var `DATABASE_URL`
-- [ ] Rewrite `core/amenity_data_manager.py` to use SQLAlchemy instead of SQLite
-- [ ] Implement FastAPI app (`api/main.py`) with routers for properties and models
-- [ ] Add image file storage (local volume, Docker-mounted)
-- [ ] Write integration tests for API endpoints (using a test PostgreSQL DB)
+- [x] Set up `docker-compose.yml` with PostgreSQL service
+- [x] Set up SQLAlchemy + Alembic for ORM and migrations
+- [x] Define ORM models (`db/models.py`): `Property`, `Image`, `DetectedAmenity`
+- [x] Implement `db/session.py` — connection factory using env-var `DATABASE_URL`
+- [x] Rewrite `core/amenity_data_manager.py` to use SQLAlchemy instead of SQLite
+- [x] Implement FastAPI app (`api/main.py`) with routers for properties and models
+- [x] Add image file storage (local volume, Docker-mounted)
+- [x] Write integration tests for API endpoints (using a test SQLite DB; override `TEST_DATABASE_URL` for PostgreSQL)
 
 **Deliverable**: `docker compose up` starts the API + DB; `/api/v1/properties/upload` works end-to-end.
 
@@ -330,7 +332,7 @@ Two tabs:
 | Database | PostgreSQL | 16 |
 | Config | Hydra-core | 1.3+ |
 | Local VLM serving | Ollama | latest |
-| VLM SDK (Gemini) | `google-generativeai` | latest |
+| VLM SDK (Gemini) | `google-genai` | latest (switched from deprecated google-generativeai) |
 | Linting | `ruff` | latest |
 | Type checking | `mypy` | latest |
 | Testing | `pytest` + `httpx` | latest |
@@ -353,3 +355,10 @@ Two tabs:
 1. **Image storage in cloud**: S3 vs GCS — depends on which cloud provider you pick in Phase 5. No decision needed now.
 2. **Confidence scoring**: The VLMs return free-text, not structured scores. We'll need to parse or prompt-engineer for this. Exact strategy TBD during Phase 1 experimentation.
 3. **LLaMA 3.2 Vision 11B on 6GB VRAM**: May require CPU offloading (slow). We'll measure latency during Phase 1 and document findings. If too slow, we drop to Qwen2.5-VL-7B as the sole local option.
+
+-- 
+
+## Important pointers when developing code
+
+1. **Testing each phase**: Testing of each phase is necessary and required as we try to make a robust application.
+2. **Decision documentation and explanation**: When writing code, also explain the decision behind this and present an ARCHITECTURE.md file, that keeps updating. Please ignore this file as we do not want this to be shown on github.
