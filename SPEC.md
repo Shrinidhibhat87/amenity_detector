@@ -248,8 +248,8 @@ Two tabs:
 
 - [x] Start to ignore SPEC.md file and also resources folder using .gitignore
 - [x] Cleanup the .gitignore file and make sure only the required files/folders are mentioned
-- [ ] Install and configure Ollama locally (outside Docker for now) — manual step, see README
-- [ ] Pull quantized models: `ollama pull qwen2.5vl:7b` and `ollama pull llama3.2-vision:11b` — manual step
+- [x] Install and configure Ollama locally (outside Docker for now) — manual step, see README
+- [x] Pull quantized models: `ollama pull qwen2.5vl:7b` and `ollama pull llama3.2-vision:11b` — manual step
 - [x] Implement `models/base.py` — `VLMClient` ABC + `VLMResponse` dataclass
 - [x] Implement `models/ollama_client.py` — wraps Ollama REST API
 - [x] Implement `models/gemini_client.py` — wraps `google-generativeai` SDK
@@ -281,12 +281,12 @@ Two tabs:
 ### Phase 3 — Gradio Frontend
 **Goal**: Replace Streamlit with a Gradio UI that talks to the FastAPI backend.
 
-- [ ] Implement `ui/app.py` — Upload tab and Browse tab
-- [ ] Upload tab calls `POST /api/v1/properties/upload`, displays results
-- [ ] Browse tab calls `GET /api/v1/properties/search`, renders table
-- [ ] Model selector dropdown reads from `GET /api/v1/models`
-- [ ] Add Gradio service to `docker-compose.yml`
-- [ ] End-to-end manual test: upload images → see amenities → browse
+- [x] Implement `ui/app.py` — Upload tab and Browse tab
+- [x] Upload tab calls `POST /api/v1/properties/upload`, displays results
+- [x] Browse tab calls `GET /api/v1/properties/search`, renders table
+- [x] Model selector dropdown reads from `GET /api/v1/models`
+- [x] Add Gradio service to `docker-compose.yml`
+- [ ] End-to-end manual test: upload images → see amenities → browse — deferred (requires running services)
 
 **Deliverable**: `docker compose up` starts everything; full upload-to-browse flow works.
 
@@ -295,13 +295,13 @@ Two tabs:
 ### Phase 4 — Observability & Hardening
 **Goal**: Make it feel like a real production service.
 
-- [ ] Structured JSON logging across all services
-- [ ] Add request/response logging middleware to FastAPI
-- [ ] Add Prometheus metrics endpoint (`/metrics`) to FastAPI
-- [ ] Optionally: add Grafana + Prometheus to `docker-compose.yml`
-- [ ] Improve confidence scoring (parse model output more robustly)
-- [ ] Handle edge cases: no amenities found, model timeout, bad image format
-- [ ] Expand test coverage to ~70%+
+- [x] Structured JSON logging across all services (`api/logging_config.py`, `LOG_FORMAT=json`)
+- [x] Add request/response logging middleware to FastAPI (`api/middleware.py`)
+- [x] Add Prometheus metrics endpoint (`/metrics`) to FastAPI via `prometheus-fastapi-instrumentator`
+- [x] Add Grafana + Prometheus to `docker-compose.yml` (ports 9090 and 3000)
+- [x] Improve confidence scoring — VLM now returns `{"present": bool, "confidence": float}` per amenity
+- [x] Handle edge cases: VLM timeouts/errors return empty dicts (no pipeline crash); bad images rejected at upload boundary
+- [x] Expand test coverage to ~70%+ (119 tests: unit tests for AmenityDetector, PropertyAmenitySystem, RequestLoggingMiddleware + existing 78 tests)
 
 **Deliverable**: `docker compose up` with monitoring stack; resilient to bad inputs.
 
