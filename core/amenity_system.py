@@ -26,6 +26,7 @@ Design note:
 import logging
 from pathlib import Path
 
+from PIL import Image as PILImage
 from PIL.Image import Image
 from sqlalchemy.orm import Session
 
@@ -225,7 +226,8 @@ class PropertyAmenitySystem:
             if item.get("is_present"):
                 room = str(item.get("room_type", "unknown"))
                 name = str(item.get("amenity_name", ""))
-                by_room.setdefault(room, []).append(name)
+                if name:
+                    by_room.setdefault(room, []).append(name)
 
         if not by_room:
             return "No amenities were confirmed as present."
@@ -244,8 +246,6 @@ class PropertyAmenitySystem:
 
         # Use a blank 1x1 white image as a placeholder — this endpoint uses text-only context.
         # Most VLMs accept an image; we pass a minimal one to keep the interface consistent.
-        from PIL import Image as PILImage
-
         placeholder = PILImage.new("RGB", (1, 1), color=(255, 255, 255))
 
         try:

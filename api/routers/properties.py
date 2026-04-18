@@ -3,6 +3,7 @@ Properties router — handles all /api/v1/properties/* endpoints.
 
 Endpoints:
   POST   /api/v1/properties/upload          Upload images + trigger detection
+  POST   /api/v1/properties/{id}/describe   Regenerate description from edited amenity list
   GET    /api/v1/properties/                List all properties (paginated)
   GET    /api/v1/properties/search          Filter by required amenities
   GET    /api/v1/properties/{id}            Full property details
@@ -252,6 +253,8 @@ def regenerate_description(
         system = PropertyAmenitySystem(
             vlm_client=vlm_client,
             db=db,
+            # storage_dir is required by PropertyAmenitySystem.__init__ (it calls mkdir).
+            # No images are written in this describe-only path.
             image_storage_dir=storage_dir,
         )
         amenities_as_dicts = [
