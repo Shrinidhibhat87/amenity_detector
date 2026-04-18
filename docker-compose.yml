@@ -54,6 +54,10 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    # extra_hosts makes host.docker.internal resolve on native Linux Docker Engine.
+    # On Docker Desktop this entry is harmless — Docker Desktop adds it automatically.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       # Database connection — "db" resolves to the PostgreSQL service above via Docker DNS
       DATABASE_URL: postgresql://${POSTGRES_USER:-amenity_user}:${POSTGRES_PASSWORD:-amenity_pass}@db:5432/${POSTGRES_DB:-amenity_db}
