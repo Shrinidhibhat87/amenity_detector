@@ -72,3 +72,6 @@ GIT_CONVENTIONS.md
 .vscode/
 .idea/
 
+
+# Visual brainstorming session files
+.superpowers/
