@@ -9,7 +9,7 @@
 
 Phases 0–4 are complete. The app runs on FastAPI + Gradio inside Docker Compose, with Ollama serving local VLMs on the host. Two problems were identified:
 
-1. **Generation bug (T1):** Images upload successfully but the VLM description is never generated. The error is swallowed silently. Suspected cause: Docker networking — the API container calls `http://localhost:11434` for Ollama, but `localhost` inside a container refers to the container itself, not the host machine. Gemini failures are likely a missing or incorrectly injected `GEMINI_API_KEY`.
+1. **Generation bug (T1):** Images upload successfully but the VLM description is never generated. **Confirmed via `docker compose logs api`:** two distinct errors.
 
 2. **UI aesthetics (T2):** The current Gradio UI is functional but visually plain. It goes straight to functional tabs with no landing page, uses default Gradio styling, and the upload flow has no step-by-step structure or editable amenity review.
 
@@ -17,16 +17,27 @@ Phases 0–4 are complete. The app runs on FastAPI + Gradio inside Docker Compos
 
 ## T1 — Generation Bug Fix
 
-### Root Cause (hypothesis)
-- **Ollama (local VLMs):** The API container resolves `http://localhost:11434` to itself, not the host. Fix: use `http://host.docker.internal:11434` on Docker Desktop (Windows/Mac WSL) or the host gateway IP on Linux. The `OLLAMA_BASE_URL` environment variable should be set in `docker-compose.yml`.
-- **Gemini:** `GEMINI_API_KEY` may not be forwarded into the API container. Fix: ensure it is declared in `.env` and passed via `env_file` or `environment` in `docker-compose.yml`.
-- **Silent errors:** The exception handler in the API router swallows errors with a generic message. Fix: log the full traceback at ERROR level so it appears in `docker compose logs api`.
+### Root Causes (confirmed from `docker compose logs api`)
+
+**Bug 1 — Ollama unreachable from Docker:**
+```
+ERROR: Cannot connect to Ollama at http://localhost:11434. Is the Ollama server running?
+```
+Inside a Docker container, `localhost` means the container itself — not the host machine where `ollama serve` is running. The fix is to point the API container at the host via `host.docker.internal` (works on Docker Desktop / WSL2) or the host gateway IP (Linux without Docker Desktop).
+
+**Bug 2 — Gemini free-tier quota exhausted:**
+```
+429 RESOURCE_EXHAUSTED: Quota exceeded for generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0
+```
+The API key is correctly forwarded and working — but the free-tier daily quota has been exhausted. `limit: 0` means the free tier for this Google Cloud project has been fully consumed. This is **not a code bug**; it resets daily. In the meantime, switching to a local Ollama model is the workaround.
+
+**Note on error visibility:** The backend logs are already showing errors correctly (good logging in `core/amenity_system`). The problem is the Gradio UI shows only a generic status message — users can't see the real error. The UI should surface the error detail returned by the API.
 
 ### Fix Plan
-1. Update `docker-compose.yml`: add `OLLAMA_BASE_URL: http://host.docker.internal:11434` to the `api` service environment (with a fallback for Linux using host gateway).
-2. Verify `GEMINI_API_KEY` is forwarded to the `api` container.
-3. Improve error logging in the upload router — log `exc_info=True` so the full traceback is visible.
-4. Test all three models end-to-end after fix.
+1. Update `docker-compose.yml`: add `OLLAMA_BASE_URL: http://host.docker.internal:11434` to the `api` service environment. Add `extra_hosts: ["host.docker.internal:host-gateway"]` for Linux compatibility.
+2. Surface API error details in the Gradio UI status field (pass the error message from the API response through to the user).
+3. Gemini quota: document in README that free tier resets daily; no code change needed.
+4. Test Ollama end-to-end after the networking fix.
 
 ---
 
