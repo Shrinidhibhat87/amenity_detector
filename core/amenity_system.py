@@ -198,6 +198,63 @@ class PropertyAmenitySystem:
         self.logger.info("Upload complete: property_id=%s", prop.id)
         return prop
 
+    def generate_description_from_amenities(
+        self,
+        amenities: list[dict[str, object]],
+        property_name: str,
+        extra_info: str | None = None,
+    ) -> str:
+        """
+        Generate a property description from a user-edited amenity list.
+
+        Called when the user has reviewed the detected amenities, made edits,
+        and clicks 'Confirm & Generate Description'. Only amenities where
+        is_present=True are included in the prompt.
+
+        Args:
+            amenities:     List of dicts with keys: amenity_name, room_type, is_present.
+            property_name: Used to personalise the description.
+            extra_info:    Optional context (e.g. "2-bed flat in Frankfurt").
+
+        Returns:
+            A natural-language description string from the VLM.
+        """
+        # Group confirmed amenities by room
+        by_room: dict[str, list[str]] = {}
+        for item in amenities:
+            if item.get("is_present"):
+                room = str(item.get("room_type", "unknown"))
+                name = str(item.get("amenity_name", ""))
+                by_room.setdefault(room, []).append(name)
+
+        if not by_room:
+            return "No amenities were confirmed as present."
+
+        # Build a structured prompt so the VLM has clear input
+        room_lines = "\n".join(
+            f"  - {room.title()}: {', '.join(items)}" for room, items in by_room.items()
+        )
+        context = f" Additional context: {extra_info}." if extra_info else ""
+        prompt = (
+            f"You are writing a property listing description for '{property_name}'.{context}\n"
+            f"The following amenities have been confirmed as present:\n{room_lines}\n\n"
+            "Write a warm, professional 3-4 sentence description of the property that "
+            "highlights these amenities. Do not invent amenities not listed above."
+        )
+
+        # Use a blank 1x1 white image as a placeholder — this endpoint uses text-only context.
+        # Most VLMs accept an image; we pass a minimal one to keep the interface consistent.
+        from PIL import Image as PILImage
+
+        placeholder = PILImage.new("RGB", (1, 1), color=(255, 255, 255))
+
+        try:
+            response = self.detector.client.generate(image=placeholder, prompt=prompt)
+            return str(response.raw_text).strip()
+        except Exception as e:
+            self.logger.error("Description generation failed: %s", e)
+            raise RuntimeError(f"Description generation failed: {e}") from e
+
 
 def _infer_room_type(amenities_by_room: dict[str, dict[str, bool]]) -> str | None:
     """

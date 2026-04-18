@@ -25,6 +25,8 @@ from sqlalchemy.orm import Session
 
 from api.dependencies import get_image_storage_dir, get_model_registry
 from api.schemas import (
+    DescribeRequest,
+    DescribeResponse,
     DetectedAmenityResponse,
     PropertyDetailResponse,
     PropertyImageResponse,
@@ -206,6 +208,66 @@ def search_properties(
         )
         for prop in properties
     ]
+
+
+@router.post("/{property_id}/describe", response_model=DescribeResponse)
+def regenerate_description(
+    property_id: str,
+    body: DescribeRequest,
+    db: Session = Depends(get_db),
+    registry: ModelRegistry = Depends(get_model_registry),
+    storage_dir: Path = Depends(get_image_storage_dir),
+) -> DescribeResponse:
+    """
+    Regenerate a property description from the user's edited amenity list.
+
+    Called after the user reviews and edits the detected amenities in the UI.
+    The VLM is asked to write a fresh description based only on the amenities
+    the user confirmed as present.
+
+    Args:
+        property_id: UUID of the existing property (must exist in the DB).
+        body:        Edited amenity list + the model to use for generation.
+
+    Returns:
+        DescribeResponse with the new description text.
+
+    Raises:
+        400: If the model is unknown.
+        404: If the property does not exist.
+        500: If VLM inference fails.
+    """
+    from db.models import Property as PropertyModel
+
+    prop = db.get(PropertyModel, property_id)
+    if prop is None:
+        raise HTTPException(status_code=404, detail=f"Property '{property_id}' not found.")
+
+    try:
+        vlm_client = registry.get(body.model_name)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    try:
+        system = PropertyAmenitySystem(
+            vlm_client=vlm_client,
+            db=db,
+            image_storage_dir=storage_dir,
+        )
+        amenities_as_dicts = [
+            {"amenity_name": a.amenity_name, "room_type": a.room_type, "is_present": a.is_present}
+            for a in body.amenities
+        ]
+        description = system.generate_description_from_amenities(
+            amenities=amenities_as_dicts,
+            property_name=prop.name,
+            extra_info=prop.extra_info,
+        )
+    except Exception as e:
+        logger.exception("Description regeneration failed for property '%s'", property_id)
+        raise HTTPException(status_code=500, detail=f"Description generation failed: {e}") from e
+
+    return DescribeResponse(description=description)
 
 
 @router.get("/{property_id}", response_model=PropertyDetailResponse)
