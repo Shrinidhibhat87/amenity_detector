@@ -12,6 +12,7 @@ Design notes:
 """
 
 from collections.abc import Generator
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -150,8 +151,7 @@ def test_describe_returns_description(client: TestClient, in_memory_db: Session)
 
     assert response.status_code == 200
     body = response.json()
-    assert "description" in body
-    assert len(body["description"]) > 0
+    assert body["description"] == "A lovely property with a sofa and a fridge."
 
 
 def test_describe_returns_404_for_unknown_property(client: TestClient) -> None:
@@ -171,7 +171,24 @@ def test_describe_returns_404_for_unknown_property(client: TestClient) -> None:
     assert response.status_code == 404
 
 
-def test_generate_description_from_amenities_filters_absent() -> None:
+def test_describe_returns_400_for_unknown_model(client: TestClient, in_memory_db: Session) -> None:
+    """If the model_name is not registered in the registry, endpoint returns 400."""
+    prop = _make_property(in_memory_db)
+
+    response = client.post(
+        f"/api/v1/properties/{prop.id}/describe",
+        json={
+            "amenities": [
+                {"amenity_name": "Sofa", "room_type": "living_room", "is_present": True},
+            ],
+            "model_name": "unknown-model-xyz",
+        },
+    )
+
+    assert response.status_code == 400
+
+
+def test_generate_description_from_amenities_filters_absent(tmp_path: Path) -> None:
     """
     generate_description_from_amenities must only include is_present=True
     amenities in the prompt sent to the VLM.
@@ -186,14 +203,11 @@ def test_generate_description_from_amenities_filters_absent() -> None:
         raw_text="A property with a sofa.", model_name="test"
     )
 
-    # Construct the system without calling __init__ so we can inject mocks directly.
-    # __new__ creates the instance without running __init__, letting us set attributes
-    # manually — a common pattern when __init__ has required external dependencies.
-    system = PropertyAmenitySystem.__new__(PropertyAmenitySystem)
-    system.logger = MagicMock()
-    system.detector = MagicMock()
-    # AmenityDetector stores the VLM client as `self.client` (see core/amenity_detector.py)
-    system.detector.client = mock_vlm
+    system = PropertyAmenitySystem(
+        vlm_client=mock_vlm,
+        db=MagicMock(),
+        image_storage_dir=tmp_path,
+    )
 
     amenities = [
         {"amenity_name": "Sofa", "room_type": "living_room", "is_present": True},
@@ -213,16 +227,18 @@ def test_generate_description_from_amenities_filters_absent() -> None:
     assert isinstance(result, str)
 
 
-def test_generate_description_empty_amenities_returns_fallback() -> None:
+def test_generate_description_empty_amenities_returns_fallback(tmp_path: Path) -> None:
     """
     If every amenity in the list has is_present=False, the method should return
     the fallback sentinel string without calling the VLM at all.
     """
     from core.amenity_system import PropertyAmenitySystem
 
-    system = PropertyAmenitySystem.__new__(PropertyAmenitySystem)
-    system.logger = MagicMock()
-    system.detector = MagicMock()
+    system = PropertyAmenitySystem(
+        vlm_client=MagicMock(),
+        db=MagicMock(),
+        image_storage_dir=tmp_path,
+    )
 
     result = system.generate_description_from_amenities(
         amenities=[{"amenity_name": "Sofa", "room_type": "lr", "is_present": False}],
