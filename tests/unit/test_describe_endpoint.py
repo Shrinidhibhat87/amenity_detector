@@ -80,7 +80,9 @@ def mock_vlm() -> MagicMock:
 
 
 @pytest.fixture()
-def client(in_memory_db: Session, mock_vlm: MagicMock, tmp_path) -> Generator[TestClient, None, None]:
+def client(
+    in_memory_db: Session, mock_vlm: MagicMock, tmp_path
+) -> Generator[TestClient, None, None]:
     """
     TestClient for the full FastAPI app with all heavy dependencies overridden.
 
@@ -152,6 +154,36 @@ def test_describe_returns_description(client: TestClient, in_memory_db: Session)
     assert response.status_code == 200
     body = response.json()
     assert body["description"] == "A lovely property with a sofa and a fridge."
+
+
+def test_describe_passes_sidebar_hints_to_prompt(
+    client: TestClient,
+    in_memory_db: Session,
+    mock_vlm: MagicMock,
+) -> None:
+    """Phase 5 sidebar hints should be included in the VLM prompt."""
+    prop = _make_property(in_memory_db)
+
+    response = client.post(
+        f"/api/v1/properties/{prop.id}/describe",
+        json={
+            "amenities": [
+                {"amenity_name": "Sofa", "room_type": "living_room", "is_present": True},
+            ],
+            "model_name": "gemini-2.0-flash",
+            "num_rooms": 2,
+            "has_kitchen": True,
+            "has_balcony": False,
+            "has_living_room": True,
+        },
+    )
+
+    assert response.status_code == 200
+    prompt_used: str = mock_vlm.generate.call_args.kwargs["prompt"]
+    assert "2 rooms" in prompt_used
+    assert "has a kitchen" in prompt_used
+    assert "no balcony" in prompt_used
+    assert "has a living room" in prompt_used
 
 
 def test_describe_returns_404_for_unknown_property(client: TestClient) -> None:

@@ -102,6 +102,33 @@ class PropertyDetailResponse(BaseModel):
 # ── Upload response schema ────────────────────────────────────────────────────
 
 
+class PropertyCreateRequest(BaseModel):
+    """
+    Request body for creating an empty property shell.
+
+    Used by the Phase 5 UI before uploading images one-by-one.
+    """
+
+    name: str
+    model_name: str
+    extra_info: str | None = None
+
+
+class PropertyCreateResponse(BaseModel):
+    """Response returned after creating an empty property shell."""
+
+    property_id: str
+    message: str
+    property: PropertyDetailResponse
+
+
+class SingleImageUploadResponse(BaseModel):
+    """Response returned after processing one image for an existing property."""
+
+    property_id: str
+    image: PropertyImageResponse
+
+
 class UploadResponse(BaseModel):
     """
     Response returned after a successful property upload.
@@ -146,6 +173,10 @@ class DescribeRequest(BaseModel):
 
     amenities: list[AmenityEditItem]
     model_name: str
+    num_rooms: int | None = None
+    has_kitchen: bool | None = None
+    has_balcony: bool | None = None
+    has_living_room: bool | None = None
 
 
 class DescribeResponse(BaseModel):

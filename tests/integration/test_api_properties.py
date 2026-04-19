@@ -30,6 +30,48 @@ class TestHealthEndpoint:
 
 
 class TestUploadEndpoint:
+    def test_create_property_shell_success(self, client: TestClient):
+        """Creating a property shell should not require images."""
+        response = client.post(
+            "/api/v1/properties/",
+            json={"name": "Shell House", "model_name": "fake-model", "extra_info": "Top floor"},
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["property_id"]
+        assert data["property"]["name"] == "Shell House"
+        assert data["property"]["images"] == []
+
+    def test_upload_single_image_to_shell_success(
+        self, client: TestClient, sample_image_bytes: bytes
+    ):
+        """A shell property can receive one image and return its detection rows."""
+        shell_response = client.post(
+            "/api/v1/properties/",
+            json={"name": "Per Image House", "model_name": "fake-model"},
+        )
+        property_id = shell_response.json()["property_id"]
+
+        response = client.post(
+            f"/api/v1/properties/{property_id}/images",
+            data={"model_name": "fake-model"},
+            files={"file": ("kitchen.jpg", sample_image_bytes, "image/jpeg")},
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["property_id"] == property_id
+        assert data["image"]["file_path"].endswith("kitchen.jpg")
+        amenities = data["image"]["amenities"]
+        assert len(amenities) > 0
+
+    def test_upload_endpoint_is_marked_deprecated_in_openapi(self, client: TestClient):
+        """The old batch upload endpoint remains available but deprecated."""
+        schema = client.get("/openapi.json").json()
+        upload_schema = schema["paths"]["/api/v1/properties/upload"]["post"]
+        assert upload_schema["deprecated"] is True
+
     def test_upload_single_image_success(self, client: TestClient, sample_image_bytes: bytes):
         """Uploading one valid image should create a property and return 201."""
         response = client.post(

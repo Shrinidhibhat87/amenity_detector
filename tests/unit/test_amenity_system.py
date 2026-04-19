@@ -108,6 +108,11 @@ class TestInferRoomType:
         }
         assert _infer_room_type(amenities_by_room) is None
 
+    def test_single_structured_room_is_kept_even_without_amenities(self):
+        """Phase 5 room labels come directly from the VLM response."""
+        amenities_by_room = {"bathroom": {"bathtub": False}}
+        assert _infer_room_type(amenities_by_room) == "bathroom"
+
     def test_handles_empty_schema(self):
         assert _infer_room_type({}) is None
 
@@ -259,3 +264,33 @@ class TestProcessUpload:
             select(func.count(PropertyImage.id)).where(PropertyImage.property_id == prop.id)
         )
         assert count == 2
+
+
+# ── generate_description_from_amenities ─────────────────────────────────────
+
+
+def test_generate_description_includes_sidebar_hints(tmp_path: Path) -> None:
+    """Optional Phase 5 sidebar hints should appear in the description prompt."""
+    mock_vlm = MagicMock()
+    mock_vlm.generate.return_value = VLMResponse(raw_text="A bright apartment.", model_name="test")
+
+    system = PropertyAmenitySystem(
+        vlm_client=mock_vlm,
+        db=MagicMock(),
+        image_storage_dir=tmp_path,
+    )
+
+    system.generate_description_from_amenities(
+        amenities=[{"amenity_name": "Sofa", "room_type": "living_room", "is_present": True}],
+        property_name="Hinted House",
+        num_rooms=2,
+        has_kitchen=True,
+        has_balcony=False,
+        has_living_room=True,
+    )
+
+    prompt_used: str = mock_vlm.generate.call_args.kwargs["prompt"]
+    assert "2 rooms" in prompt_used
+    assert "has a kitchen" in prompt_used
+    assert "no balcony" in prompt_used
+    assert "has a living room" in prompt_used

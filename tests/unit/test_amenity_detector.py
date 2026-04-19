@@ -76,6 +76,12 @@ class TestBuildDetectionPrompt:
         prompt = detector._build_detection_prompt(["refrigerator"])
         assert "confidence" in prompt.lower()
 
+    def test_prompt_requests_room_type(self, detector: AmenityDetector):
+        """Phase 5: prompt should request the room label in the same JSON call."""
+        prompt = detector._build_detection_prompt(["refrigerator"])
+        assert "room_type" in prompt
+        assert "amenities" in prompt
+
 
 class TestBuildDescriptionPrompt:
     def test_includes_present_amenities(self, detector: AmenityDetector):
@@ -291,3 +297,79 @@ class TestGenerateDescription:
         assert isinstance(result, str)
         # The fallback message is defined in the implementation
         assert len(result) > 0
+
+
+# ── Preprocessing integration ───────────────────────────────────────────────
+
+
+class TestDetectFromImageAppliesPreprocessing:
+    def test_detect_passes_preprocessed_image_to_vlm(
+        self,
+        detector: AmenityDetector,
+        fake_vlm: MagicMock,
+    ) -> None:
+        """A 2000x2000 image should reach the VLM at 768x768 after preprocessing."""
+        fake_vlm.generate.return_value = VLMResponse(raw_text="{}", model_name="fake-model")
+        big = PILImage.new("RGB", (2000, 2000), color=(1, 2, 3))
+
+        detector.detect_from_image(big)
+
+        assert fake_vlm.generate.call_count == 1
+        call_args = fake_vlm.generate.call_args
+        sent_image = call_args.args[0] if call_args.args else call_args.kwargs["image"]
+        assert sent_image.size == (768, 768)
+
+
+# ── Structured JSON with room_type (Phase 5) ────────────────────────────────
+
+
+class TestDetectFromImageStructuredJSON:
+    def test_parses_new_shape_with_room_type_and_amenities(
+        self,
+        detector: AmenityDetector,
+        fake_vlm: MagicMock,
+        small_image: PILImage.Image,
+    ) -> None:
+        """A Phase 5 response parses into the existing 3-tuple return shape."""
+        fake_vlm.generate.return_value = VLMResponse(
+            raw_text=(
+                '{"room_type": "kitchen", '
+                '"amenities": {'
+                '"refrigerator": {"present": true, "confidence": 0.92}, '
+                '"oven": {"present": true, "confidence": 0.85}, '
+                '"dishwasher": {"present": false, "confidence": 0.10}'
+                "}}"
+            ),
+            model_name="fake-model",
+        )
+
+        amenities_by_room, flat_amenities, flat_confidences = detector.detect_from_image(
+            small_image
+        )
+
+        assert set(amenities_by_room.keys()) == {"kitchen"}
+        assert amenities_by_room["kitchen"]["refrigerator"] is True
+        assert amenities_by_room["kitchen"]["dishwasher"] is False
+        assert flat_amenities["oven"] is True
+        assert flat_confidences["refrigerator"] == pytest.approx(0.92)
+
+    def test_legacy_flat_shape_still_parses(
+        self,
+        detector: AmenityDetector,
+        fake_vlm: MagicMock,
+        amenity_schema: dict[str, list[str]],
+        small_image: PILImage.Image,
+    ) -> None:
+        """Older flat amenity JSON remains supported for existing clients/tests."""
+        fake_vlm.generate.return_value = VLMResponse(
+            raw_text='{"refrigerator": true, "bed": false}',
+            model_name="fake-model",
+        )
+
+        amenities_by_room, flat_amenities, flat_confidences = detector.detect_from_image(
+            small_image
+        )
+
+        assert set(amenities_by_room.keys()) == set(amenity_schema.keys())
+        assert flat_amenities["refrigerator"] is True
+        assert flat_confidences["bed"] == 0.0

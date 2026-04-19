@@ -22,6 +22,7 @@ import re
 
 from PIL.Image import Image
 
+from core.preprocessing import preprocess_image
 from models.base import VLMClient
 
 
@@ -70,18 +71,23 @@ class AmenityDetector:
         """
         amenity_list = ", ".join(all_amenities)
         return (
-            "You are analysing a property image. "
-            "For each of the following amenities, determine whether it is VISIBLE in the image "
-            "and how confident you are.\n\n"
+            "You are analysing one property photo. Identify the most likely room type "
+            "(for example kitchen, bedroom, bathroom, living_room, balcony, dining_room, "
+            "or unknown), then check which listed amenities are visible.\n\n"
             f"Amenities to check: {amenity_list}\n\n"
-            "Respond ONLY with a JSON object. "
-            "Keys are amenity names (exactly as listed above). "
-            "Each value must be an object with two keys:\n"
-            '  "present": true if the amenity is visible, false otherwise\n'
-            '  "confidence": a float from 0.0 (not sure) to 1.0 (certain)\n\n'
-            "Example format:\n"
-            '{"refrigerator": {"present": true, "confidence": 0.95}, '
-            '"oven": {"present": false, "confidence": 0.1}}\n\n'
+            "Respond ONLY with one JSON object using this exact shape:\n"
+            "{\n"
+            '  "room_type": "kitchen",\n'
+            '  "amenities": {\n'
+            '    "refrigerator": {"present": true, "confidence": 0.95},\n'
+            '    "oven": {"present": false, "confidence": 0.10}\n'
+            "  }\n"
+            "}\n\n"
+            "Rules:\n"
+            "- Use amenity names exactly as listed above.\n"
+            "- Set present=true only when the amenity is clearly visible.\n"
+            "- Confidence must be a number from 0.0 to 1.0.\n"
+            "- Do not add commentary, markdown, or keys outside room_type and amenities.\n\n"
             "JSON response:"
         )
 
@@ -194,6 +200,31 @@ class AmenityDetector:
         )
         return False, 0.0
 
+    def _parse_raw_json_object(self, text: str) -> dict[str, object] | None:
+        """
+        Extract and decode a JSON object from VLM free text.
+
+        Returns:
+            The decoded object, or None when extraction/decoding fails.
+        """
+        json_str = self._extract_json_string(text)
+        if json_str is None:
+            self.logger.warning("No JSON object found in VLM response. Raw: %s", text[:300])
+            return None
+
+        json_str = self._normalise_json_string(json_str)
+
+        try:
+            raw = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            self.logger.warning("JSON parse failed (%s). Raw text: %s", e, text[:300])
+            return None
+
+        if not isinstance(raw, dict):
+            self.logger.warning("VLM JSON response was not an object. Raw: %s", text[:300])
+            return None
+        return raw
+
     def _parse_json_from_text(self, text: str) -> dict[str, tuple[bool, float]]:
         """
         Extract amenity detection results from VLM free-text output.
@@ -215,20 +246,46 @@ class AmenityDetector:
             Dict mapping amenity name → (is_present, confidence).
             Returns an empty dict if no valid JSON is found.
         """
-        json_str = self._extract_json_string(text)
-        if json_str is None:
-            self.logger.warning("No JSON object found in VLM response. Raw: %s", text[:300])
+        raw = self._parse_raw_json_object(text)
+        if raw is None:
             return {}
 
-        json_str = self._normalise_json_string(json_str)
-
-        try:
-            raw: dict[str, object] = json.loads(json_str)
-        except json.JSONDecodeError as e:
-            self.logger.warning("JSON parse failed (%s). Raw text: %s", e, text[:300])
-            return {}
+        # Phase 5 response shape nests amenity entries under "amenities".
+        if isinstance(raw.get("amenities"), dict):
+            raw = raw["amenities"]  # type: ignore[assignment]
 
         return {key: self._parse_amenity_entry(key, val) for key, val in raw.items()}
+
+    def _parse_detection_response(
+        self, text: str
+    ) -> tuple[str | None, dict[str, tuple[bool, float]]]:
+        """
+        Parse the preferred Phase 5 detection response.
+
+        The preferred shape is:
+            {"room_type": "kitchen", "amenities": {"oven": {"present": true, ...}}}
+
+        For compatibility with existing tests and less obedient models, the older
+        flat amenity object is still accepted and returns room_type=None.
+        """
+        raw = self._parse_raw_json_object(text)
+        if raw is None:
+            return None, {}
+
+        room_type = raw.get("room_type")
+        parsed_room = (
+            str(room_type).strip() if isinstance(room_type, str) and room_type.strip() else None
+        )
+
+        amenities_obj = raw.get("amenities")
+        if isinstance(amenities_obj, dict):
+            parsed = {
+                key: self._parse_amenity_entry(key, val) for key, val in amenities_obj.items()
+            }
+            return parsed_room, parsed
+
+        parsed = {key: self._parse_amenity_entry(key, val) for key, val in raw.items()}
+        return None, parsed
 
     def detect_from_image(
         self, image: Image
@@ -271,23 +328,30 @@ class AmenityDetector:
         prompt = self._build_detection_prompt(all_amenities)
 
         # Call the VLM — catch RuntimeError (connection/timeout/HTTP errors from clients)
+        processed = preprocess_image(image)
         try:
-            response = self.client.generate(image, prompt)
-            parsed = self._parse_json_from_text(response.raw_text)
+            response = self.client.generate(processed, prompt)
+            detected_room, parsed = self._parse_detection_response(response.raw_text)
         except RuntimeError as e:
             self.logger.error("VLM detection failed: %s", e)
+            detected_room = None
             parsed = {}
 
         # Split the parsed dict into separate bool and float dicts for clarity
         flat_amenities: dict[str, bool] = {k: v[0] for k, v in parsed.items()}
         flat_confidences: dict[str, float] = {k: v[1] for k, v in parsed.items()}
 
-        # Organise flat results back into the room-type structure
+        # Prefer the room label supplied by the Phase 5 structured response. For
+        # legacy flat responses, keep the older schema-wide structure so callers
+        # can still infer a room by counting present amenities.
         amenities_by_room: dict[str, dict[str, bool]] = {}
-        for room_type, amenity_list in self.amenity_schema.items():
-            amenities_by_room[room_type] = {
-                amenity: flat_amenities.get(amenity, False) for amenity in amenity_list
-            }
+        if detected_room:
+            amenities_by_room[detected_room] = dict(flat_amenities)
+        else:
+            for room_type, amenity_list in self.amenity_schema.items():
+                amenities_by_room[room_type] = {
+                    amenity: flat_amenities.get(amenity, False) for amenity in amenity_list
+                }
 
         return amenities_by_room, flat_amenities, flat_confidences
 
