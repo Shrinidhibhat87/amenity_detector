@@ -130,7 +130,8 @@ services:
     volumes:
       # Persist dashboards and data source configs across restarts
       - grafana_data:/var/lib/grafana
-      # Auto-provision the Prometheus data source so you don't have to add it manually
+      # Auto-provision the Prometheus data source AND the Amenity Detector dashboard
+      # so both appear automatically at http://localhost:3000 with no manual setup
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus

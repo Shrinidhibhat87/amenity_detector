@@ -35,16 +35,20 @@ FROM python:3.11-slim AS runtime
 
 WORKDIR /app
 
+# Install curl — needed by the Docker Compose health check.
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 # Copy only the installed virtual environment from the builder stage
 COPY --from=builder /app/.venv /app/.venv
 
 # Add the venv to PATH so we can call python directly
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Tell Python to look in /app for local modules (ui/ package)
+# Tell Python to look in /app for local modules (ui/ and shared core/ packages)
 ENV PYTHONPATH="/app"
 
-# Copy only the UI source code — no API, DB, or model code needed here
+# Copy only the shared logging helper — no API, DB, model, or detector code needed here
+COPY core/__init__.py core/logging_config.py ./core/
 COPY ui/ ./ui/
 
 # Expose the Gradio default port

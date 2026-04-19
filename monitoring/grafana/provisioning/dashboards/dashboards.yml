@@ -1,0 +1,21 @@
+# Grafana dashboard provisioning — tells Grafana to load JSON dashboard files
+# from this directory automatically at startup.
+#
+# Without this file you would have to import dashboards manually through the
+# Grafana web UI every time you recreate the container. With provisioning, the
+# dashboard appears automatically at http://localhost:3000.
+#
+# After docker compose up, open Grafana → Dashboards → Amenity Detector API.
+
+apiVersion: 1
+
+providers:
+  - name: Amenity Detector
+    type: file
+    # Grafana watches this directory for JSON dashboard files
+    options:
+      path: /etc/grafana/provisioning/dashboards
+    # Allow the dashboard to be edited in the UI (changes won't persist across
+    # container restarts unless you also save the JSON back to this folder)
+    allowUiUpdates: true
+    disableDeletion: false

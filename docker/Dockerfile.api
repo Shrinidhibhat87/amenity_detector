@@ -37,6 +37,9 @@ FROM python:3.11-slim AS runtime
 
 WORKDIR /app
 
+# Install curl — needed by the Docker Compose health check (python:3.11-slim omits it)
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 # Copy the installed virtual environment from the builder stage
 COPY --from=builder /app/.venv /app/.venv
 

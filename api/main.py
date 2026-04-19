@@ -32,11 +32,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator  # type: ignore[import-untyped]
 
-from api.logging_config import setup_logging
 from api.middleware import RequestLoggingMiddleware
 from api.routers import models as models_router
 from api.routers import properties as properties_router
 from api.schemas import HealthResponse
+from core.logging_config import setup_logging
 from db.session import check_db_connection, create_tables
 from models.registry import ModelRegistry
 
