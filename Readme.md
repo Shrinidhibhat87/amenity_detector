@@ -2,17 +2,17 @@
 
 An end-to-end pipeline that automatically identifies amenities in property images (e.g. Airbnb listings), stores results in PostgreSQL, and exposes a REST API. Built as a learning project for real-world AI Engineering practices.
 
-**Status**: Phases 0–2 complete. FastAPI backend + PostgreSQL + VLM abstraction (Ollama / Gemini) running via Docker Compose. Gradio UI (Phase 3) is next.
+**Status**: Phases 0–5 complete. FastAPI backend + PostgreSQL + VLM abstraction (Ollama / Gemini) + Gradio UI + Prometheus/Grafana observability running via Docker Compose.
 
 ---
 
 ## What it does
 
-1. Accept one or more property images via a REST API upload
+1. Accept one or more property images via the Gradio UI or REST API
 2. Run amenity detection using a Vision-Language Model (Qwen2.5-VL-7B, LLaMA 3.2 Vision, or Gemini 2.0 Flash)
-3. Detect which amenities are visible per image (refrigerator, pool, sofa, etc.)
+3. Resize images before inference, then detect the room type and visible amenities in one VLM call per image
 4. Store property, image, and detection records in PostgreSQL
-5. Generate a natural-language description of the property
+5. Let the user review/edit detections and add structured hints before generating a natural-language description
 6. Allow browsing and searching properties by detected amenities
 
 ---
@@ -105,16 +105,30 @@ docker compose up
 This starts:
 - **PostgreSQL 16** on port `5432` (data persists in a Docker volume)
 - **FastAPI backend** on port `8000`
+- **Gradio UI** on port `7860`
+- **Prometheus** on port `9090`
+- **Grafana** on port `3000`
 
 First run takes a minute to build the Docker image. Subsequent starts are instant.
 
+When changing frontend code in `ui/`, rebuild the `ui` service too:
+
+```bash
+docker compose up -d --build ui
+```
+
+Rebuilding only `api` does not update browser-visible Gradio code because the UI runs in a separate container.
+
 ### 5. Verify it's working
 
-Open the interactive API docs in your browser:
+Open these in your browser after `docker compose up`:
 
-```
-http://localhost:8000/docs
-```
+| Service | URL | Notes |
+|---|---|---|
+| **Gradio UI** | http://localhost:7860 | Main app — landing page + upload + browse |
+| **API docs** | http://localhost:8000/docs | Interactive FastAPI Swagger UI |
+| **Prometheus** | http://localhost:9090 | Metrics scraper |
+| **Grafana** | http://localhost:3000 | Dashboards (admin / admin) |
 
 Or run a quick health check:
 
@@ -125,11 +139,96 @@ curl http://localhost:8000/health
 
 ---
 
+## Testing the Redesigned UI
+
+Follow these steps to verify everything works end-to-end.
+
+### Prerequisites
+
+1. Docker Desktop (or Docker Engine + Compose v2) is running.
+2. In a WSL terminal, start Ollama **with host binding** so Docker can reach it:
+   ```bash
+   OLLAMA_HOST=0.0.0.0 ollama serve
+   ```
+3. Your `.env` file contains:
+   ```
+   OLLAMA_BASE_URL=http://host.docker.internal:11434
+   GEMINI_API_KEY=<your key, or leave blank to use Ollama only>
+   ```
+
+### Start the stack
+
+```bash
+docker compose up --build
+```
+
+Wait until all health checks pass (~30 s). First build takes a few minutes.
+
+### Test the landing page
+
+- Open http://localhost:7860
+- Verify the hero section loads with the amber/cream colour scheme
+- Verify the typewriter animation alternates between the two sentences
+- Click **"↑ Upload & Detect"** — confirms you land on the Upload tab
+- Click **"🔍 Browse Properties"** — confirms you land on the Browse tab
+
+### Test the Upload flow (with Ollama)
+
+1. Click the **"↑ Upload & Detect"** tab
+2. Upload 2–3 room photos (JPEG or PNG)
+3. Enter a property name, e.g. `Test House`
+4. Select **qwen2.5vl:7b** from the model dropdown
+5. Fill optional **Property Hints** while detection is running:
+   - Set number of rooms to `2` or `3`
+   - Set Kitchen / Balcony / Living room to `Yes`, `No`, or `Not specified`
+6. Click **"↑ Upload & Detect Amenities"**
+7. Verify the progress bar advances after each image, rather than waiting silently for the full batch
+8. Verify the amenity table populates incrementally with rooms and amenities
+9. Change a hint to contradict the table, for example set **Balcony = No** when a balcony row is present; warning markers should appear on the mismatched rows
+10. Toggle a few checkboxes on/off in the Present column
+11. Click **"✔ Confirm & Generate Description"**
+12. Verify the step indicator reaches step 4 (Generate Description)
+13. Verify a description appears in the text box below and reflects the confirmed amenities plus any hints you provided
+
+### Test the Browse flow
+
+1. Click the **"🔍 Browse Properties"** tab
+2. Click **"List All"** — verify your uploaded property appears
+3. Copy the property ID from the table
+4. Paste it into the **Property ID** field and click **"View Details"**
+5. Verify the room and amenity breakdown appears
+
+### Gemini quota note
+
+The Gemini 2.0 Flash free tier has a daily request limit (~1500 req/day per project).
+If you see `429 RESOURCE_EXHAUSTED` in `docker compose logs api`, the quota has been
+exhausted for today. Switch to `qwen2.5vl:7b` or wait until the next day — the quota
+resets at midnight Pacific Time.
+
+### Check logs for errors
+
+```bash
+docker compose logs api --tail=50
+```
+
+There should be **no** `Cannot connect to Ollama at http://localhost:11434` errors.
+If you see them, verify your `.env` has `OLLAMA_BASE_URL=http://host.docker.internal:11434`
+and restart:
+
+```bash
+docker compose down && docker compose up
+```
+
+---
+
 ## API Endpoints
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/v1/properties/upload` | Upload images, detect amenities, store results |
+| `POST` | `/api/v1/properties/` | Create an empty property shell before per-image processing |
+| `POST` | `/api/v1/properties/{id}/images` | Upload and process one image for an existing property |
+| `POST` | `/api/v1/properties/upload` | Deprecated batch upload; kept for backward compatibility |
+| `POST` | `/api/v1/properties/{id}/describe` | Regenerate description from edited amenity list and optional sidebar hints |
 | `GET` | `/api/v1/properties/` | List all properties (paginated) |
 | `GET` | `/api/v1/properties/{id}` | Full property details (images + amenities) |
 | `GET` | `/api/v1/properties/search?amenities=pool,wifi` | Filter by required amenities |
@@ -237,11 +336,18 @@ amenity_detector/
 │   ├── unit/               # Fast tests, no external dependencies
 │   └── integration/        # API + DB tests (in-memory SQLite)
 │
+├── ui/
+│   └── app.py              # Gradio frontend (landing page + Upload + Browse tabs)
+│
+├── monitoring/
+│   ├── prometheus.yml      # Prometheus scrape config
+│   └── grafana/            # Grafana provisioning (data source + dashboards)
+│
 ├── docker/
 │   ├── Dockerfile.api      # FastAPI container
-│   └── Dockerfile.ui       # Gradio container (Phase 3)
+│   └── Dockerfile.ui       # Gradio container
 │
-├── docker-compose.yml      # PostgreSQL + API services
+├── docker-compose.yml      # Full stack: db + api + ui + prometheus + grafana
 ├── pyproject.toml          # uv dependencies + tool config
 └── .env.example            # Environment variable template
 ```
@@ -255,8 +361,8 @@ amenity_detector/
 | 0 | ✅ Done | Cleanup: uv, pre-commit, CI, type safety |
 | 1 | ✅ Done | VLM abstraction: OllamaClient, GeminiClient, ModelRegistry |
 | 2 | ✅ Done | PostgreSQL + FastAPI REST API + Docker Compose |
-| 3 | 🔜 Next | Gradio frontend: Upload tab + Browse tab |
-| 4 | Planned | Observability: structured logging, Prometheus metrics |
+| 3 | ✅ Done | Gradio frontend: hero landing page, Upload & Detect, Browse |
+| 4 | ✅ Done | Observability: Prometheus metrics + Grafana dashboards |
 | 5 | Planned | Cloud migration: managed DB, object storage, CD pipeline |
 
 ---
