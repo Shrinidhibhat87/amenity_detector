@@ -59,8 +59,10 @@ storage/          # Uploaded images (runtime data, not for git)
 
 # ── Project documentation (internal only, not for public GitHub) ─────────────
 SPEC.md
+CLAUDE.md
 ARCHITECTURE.md
 resources/
+docs/
 
 # ── Claude Code (AI assistant) ────────────────────────────────────────────────
 .claude/
@@ -72,3 +74,6 @@ GIT_CONVENTIONS.md
 .vscode/
 .idea/
 
+
+# Visual brainstorming session files
+.superpowers/

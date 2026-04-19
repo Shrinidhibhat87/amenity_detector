@@ -61,7 +61,12 @@ class GeminiClient(VLMClient):
 
         # The new google-genai SDK uses a Client object.
         # API key is passed here — not stored on self to avoid accidental logging.
-        self._client = genai.Client(api_key=resolved_key)
+        # http_options timeout is in milliseconds; 90 s is generous for a single
+        # image call while still failing clearly if the API hangs or quota throttles.
+        self._client = genai.Client(
+            api_key=resolved_key,
+            http_options={"timeout": 90_000},
+        )
 
     @property
     def model_name(self) -> str:

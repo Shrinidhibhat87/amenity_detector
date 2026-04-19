@@ -1,0 +1,38 @@
+# Prometheus scrape configuration for the Amenity Detector stack.
+#
+# What is Prometheus?
+#   Prometheus is a time-series database. It "scrapes" (pulls) metrics from your
+#   services at a regular interval and stores them. Grafana then visualises those
+#   metrics as dashboards.
+#
+# This file tells Prometheus:
+#   - How often to scrape metrics (global interval)
+#   - Which targets to scrape (the FastAPI /metrics endpoint)
+#
+# The FastAPI /metrics endpoint is added by prometheus-fastapi-instrumentator in
+# api/main.py. It exposes standard HTTP metrics:
+#   - http_requests_total        — counter of all requests by method/path/status
+#   - http_request_duration_seconds — histogram of response times
+#
+# How to access Prometheus:
+#   http://localhost:9090  (after docker compose up)
+#   → Try: http_requests_total{job="amenity-api"}
+
+global:
+  # How frequently Prometheus scrapes all targets by default
+  scrape_interval: 15s
+  # How long Prometheus waits for a scrape response before timing out
+  scrape_timeout: 10s
+  # How often Prometheus evaluates alerting rules (not used yet — Phase 5)
+  evaluation_interval: 15s
+
+scrape_configs:
+  # ── FastAPI backend metrics ──────────────────────────────────────────────────
+  - job_name: "amenity-api"
+    # Inside Docker Compose, "api" resolves to the FastAPI container's IP
+    static_configs:
+      - targets: ["api:8000"]
+    # The /metrics endpoint added by prometheus-fastapi-instrumentator
+    metrics_path: /metrics
+    # Scrape every 15 seconds — good for development; increase to 30s+ in production
+    scrape_interval: 15s

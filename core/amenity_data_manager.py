@@ -106,6 +106,7 @@ class AmenityDataManager:
         image_id: str,
         amenities: dict[str, bool],
         room_type: str | None = None,
+        confidences: dict[str, float] | None = None,
     ) -> list[DetectedAmenity]:
         """
         Bulk-insert DetectedAmenity rows for a single image.
@@ -113,27 +114,36 @@ class AmenityDataManager:
         One row is created for every amenity in the dict, regardless of whether
         it was detected or not — storing False lets us query "not detected" too.
 
-        Confidence is set to 1.0 for present amenities and 0.0 for absent ones.
-        This is a placeholder until we implement proper confidence scoring in Phase 4.
+        Confidence values come from the VLM's structured JSON output (Phase 4 improvement).
+        If no confidences dict is provided the method falls back to 1.0/0.0 heuristics.
 
         Args:
             property_id: UUID of the parent Property.
             image_id:    UUID of the parent PropertyImage.
             amenities:   Dict of amenity_name → bool from AmenityDetector.
             room_type:   The room type this image was classified as.
+            confidences: Optional dict of amenity_name → float (0.0–1.0).
+                         When provided, these values are stored directly.
+                         When absent, 1.0 is used for present amenities and 0.0 for absent.
 
         Returns:
             List of DetectedAmenity ORM objects (not yet committed).
         """
         records: list[DetectedAmenity] = []
         for amenity_name, is_present in amenities.items():
+            # Use model-supplied confidence if available; fall back to 1.0 / 0.0
+            if confidences is not None and amenity_name in confidences:
+                confidence = confidences[amenity_name]
+            else:
+                confidence = 1.0 if is_present else 0.0
+
             record = DetectedAmenity(
                 property_id=property_id,
                 image_id=image_id,
                 amenity_name=amenity_name,
                 room_type=room_type,
                 is_present=is_present,
-                confidence=1.0 if is_present else 0.0,
+                confidence=confidence,
             )
             self.db.add(record)
             records.append(record)

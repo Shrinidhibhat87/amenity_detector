@@ -47,7 +47,10 @@ class TestGeminiClientInit:
 
         with patch("models.gemini_client.genai.Client") as MockClient:
             client = GeminiClient()
-            MockClient.assert_called_once_with(api_key="env-test-key")
+            MockClient.assert_called_once_with(
+                api_key="env-test-key",
+                http_options={"timeout": 90_000},
+            )
             assert client is not None
 
     def test_explicit_key_overrides_env(self, monkeypatch):
@@ -56,7 +59,10 @@ class TestGeminiClientInit:
 
         with patch("models.gemini_client.genai.Client") as MockClient:
             GeminiClient(api_key="explicit-key")
-            MockClient.assert_called_once_with(api_key="explicit-key")
+            MockClient.assert_called_once_with(
+                api_key="explicit-key",
+                http_options={"timeout": 90_000},
+            )
 
 
 class TestGeminiClientGenerate:

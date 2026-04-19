@@ -102,6 +102,33 @@ class PropertyDetailResponse(BaseModel):
 # ── Upload response schema ────────────────────────────────────────────────────
 
 
+class PropertyCreateRequest(BaseModel):
+    """
+    Request body for creating an empty property shell.
+
+    Used by the Phase 5 UI before uploading images one-by-one.
+    """
+
+    name: str
+    model_name: str
+    extra_info: str | None = None
+
+
+class PropertyCreateResponse(BaseModel):
+    """Response returned after creating an empty property shell."""
+
+    property_id: str
+    message: str
+    property: PropertyDetailResponse
+
+
+class SingleImageUploadResponse(BaseModel):
+    """Response returned after processing one image for an existing property."""
+
+    property_id: str
+    image: PropertyImageResponse
+
+
 class UploadResponse(BaseModel):
     """
     Response returned after a successful property upload.
@@ -123,3 +150,36 @@ class HealthResponse(BaseModel):
     status: str
     database: str  # "ok" or "unreachable"
     version: str = "1.0.0"
+
+
+# ── Describe endpoint schemas ─────────────────────────────────────────────────
+
+
+class AmenityEditItem(BaseModel):
+    """One amenity entry as edited by the user in the UI."""
+
+    amenity_name: str
+    room_type: str
+    is_present: bool
+
+
+class DescribeRequest(BaseModel):
+    """
+    Request body for POST /api/v1/properties/{id}/describe.
+
+    The UI sends the user's edited amenity table so the VLM can regenerate
+    the description based only on the amenities the user confirmed as present.
+    """
+
+    amenities: list[AmenityEditItem]
+    model_name: str
+    num_rooms: int | None = None
+    has_kitchen: bool | None = None
+    has_balcony: bool | None = None
+    has_living_room: bool | None = None
+
+
+class DescribeResponse(BaseModel):
+    """Response from the describe endpoint."""
+
+    description: str

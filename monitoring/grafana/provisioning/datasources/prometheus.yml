@@ -1,0 +1,21 @@
+# Grafana data source provisioning — auto-adds Prometheus without manual configuration.
+#
+# What is provisioning?
+#   Normally you configure Grafana data sources through the web UI. Provisioning lets
+#   you define them in a YAML file that Grafana reads at startup. This means the
+#   Prometheus data source is always present, even after re-creating the container.
+#
+# After docker compose up you can open Grafana at http://localhost:3000 and
+# immediately query Prometheus metrics without any manual setup.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    # "prometheus" resolves to the Prometheus container via Docker Compose DNS
+    url: http://prometheus:9090
+    # isDefault: true makes Grafana use this data source in new panels by default
+    isDefault: true
+    access: proxy
+    editable: false

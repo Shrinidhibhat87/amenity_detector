@@ -1,25 +1,59 @@
-# ── Dockerfile for the Gradio UI ─────────────────────────────────────────────
+# ── Dockerfile for the Gradio UI frontend ────────────────────────────────────
 #
-# Placeholder — the Gradio UI is built in Phase 3.
-# This file exists to keep the Docker Compose config consistent so we can
-# reference it without changing docker-compose.yml when Phase 3 lands.
+# This is a lightweight image — it only needs Python, Gradio, and the requests
+# library to make HTTP calls to the FastAPI backend.
+# The VLM and database packages are NOT imported here; they live in the API.
 #
-# The structure will mirror Dockerfile.api once ui/app.py is implemented.
+# Multi-stage build keeps the final image small:
+#   Stage 1 (builder) — installs dependencies including any build tools
+#   Stage 2 (runtime) — copies only the installed .venv, no build tools
+#
+# Usage:
+#   Build:  docker build -f docker/Dockerfile.ui -t amenity-ui .
+#   Run:    docker run -p 7860:7860 -e API_BASE_URL=http://api:8000 amenity-ui
 
-FROM python:3.11-slim
+# ── Stage 1: install dependencies ────────────────────────────────────────────
+FROM python:3.11-slim AS builder
+
+# Install uv — the fast Python package manager
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-
+# Copy dependency manifests first.
+# Docker layer caching: if these files haven't changed, the uv sync step is
+# skipped on subsequent builds — significantly faster rebuilds.
 COPY pyproject.toml uv.lock ./
+
+# Install runtime dependencies from the lockfile.
+# --no-group dev  skips ruff, mypy, pytest (not needed at runtime)
+# --no-group local-gpu  skips torch/transformers (not used by the UI)
 RUN uv sync --frozen --no-install-project --no-group dev --no-group local-gpu
 
+# ── Stage 2: runtime image ────────────────────────────────────────────────────
+FROM python:3.11-slim AS runtime
+
+WORKDIR /app
+
+# Install curl — needed by the Docker Compose health check.
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
+# Copy only the installed virtual environment from the builder stage
+COPY --from=builder /app/.venv /app/.venv
+
+# Add the venv to PATH so we can call python directly
 ENV PATH="/app/.venv/bin:$PATH"
 
-COPY ui/ ./ui/
-COPY api/ ./api/
+# Tell Python to look in /app for local modules (ui/ and shared core/ packages)
+ENV PYTHONPATH="/app"
 
+# Copy only the shared logging helper — no API, DB, model, or detector code needed here
+COPY core/__init__.py core/logging_config.py ./core/
+COPY ui/ ./ui/
+
+# Expose the Gradio default port
 EXPOSE 7860
 
+# Launch the Gradio app.
+# API_BASE_URL should be set in docker-compose.yml: http://api:8000
 CMD ["python", "-m", "ui.app"]

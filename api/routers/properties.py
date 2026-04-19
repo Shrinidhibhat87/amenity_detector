@@ -3,6 +3,7 @@ Properties router — handles all /api/v1/properties/* endpoints.
 
 Endpoints:
   POST   /api/v1/properties/upload          Upload images + trigger detection
+  POST   /api/v1/properties/{id}/describe   Regenerate description from edited amenity list
   GET    /api/v1/properties/                List all properties (paginated)
   GET    /api/v1/properties/search          Filter by required amenities
   GET    /api/v1/properties/{id}            Full property details
@@ -25,10 +26,15 @@ from sqlalchemy.orm import Session
 
 from api.dependencies import get_image_storage_dir, get_model_registry
 from api.schemas import (
+    DescribeRequest,
+    DescribeResponse,
     DetectedAmenityResponse,
+    PropertyCreateRequest,
+    PropertyCreateResponse,
     PropertyDetailResponse,
     PropertyImageResponse,
     PropertySummaryResponse,
+    SingleImageUploadResponse,
     UploadResponse,
 )
 from core.amenity_data_manager import AmenityDataManager
@@ -44,7 +50,112 @@ router = APIRouter(prefix="/api/v1/properties", tags=["properties"])
 _ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
-@router.post("/upload", response_model=UploadResponse, status_code=201)
+@router.post("/", response_model=PropertyCreateResponse, status_code=201)
+def create_property(
+    body: PropertyCreateRequest,
+    db: Session = Depends(get_db),
+    registry: ModelRegistry = Depends(get_model_registry),
+    storage_dir: Path = Depends(get_image_storage_dir),
+) -> PropertyCreateResponse:
+    """
+    Create an empty property shell without running VLM inference.
+
+    The Phase 5 UI calls this once, then uploads images individually to
+    /api/v1/properties/{id}/images so progress can update per image.
+    """
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Property name is required.")
+
+    try:
+        vlm_client = registry.get(body.model_name)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    try:
+        system = PropertyAmenitySystem(
+            vlm_client=vlm_client,
+            db=db,
+            image_storage_dir=storage_dir,
+        )
+        prop = system.create_property_shell(
+            property_name=name,
+            model_name=body.model_name,
+            extra_info=body.extra_info.strip() if body.extra_info else None,
+        )
+    except Exception as e:
+        logger.exception("Property shell creation failed for property '%s'", name)
+        raise HTTPException(status_code=500, detail=f"Property creation failed: {e}") from e
+
+    return PropertyCreateResponse(
+        property_id=prop.id,
+        message=f"Property '{prop.name}' created successfully.",
+        property=_build_detail_response(prop),
+    )
+
+
+@router.post("/{property_id}/images", response_model=SingleImageUploadResponse, status_code=201)
+def upload_property_image(
+    property_id: str,
+    file: UploadFile = File(..., description="One property image"),
+    model_name: str = Form(..., description="VLM to use for detection"),
+    db: Session = Depends(get_db),
+    registry: ModelRegistry = Depends(get_model_registry),
+    storage_dir: Path = Depends(get_image_storage_dir),
+) -> SingleImageUploadResponse:
+    """
+    Upload and process one image for an existing property.
+
+    This endpoint is intentionally single-image so Gradio can yield progress
+    after every completed VLM call.
+    """
+    if file.content_type not in _ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"File '{file.filename}' has unsupported type '{file.content_type}'. "
+                f"Allowed: {sorted(_ALLOWED_CONTENT_TYPES)}"
+            ),
+        )
+
+    try:
+        vlm_client = registry.get(model_name)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    raw = file.file.read()
+    try:
+        pil_image = Image.open(io.BytesIO(raw)).convert("RGB")
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not decode image '{file.filename}': {e}",
+        ) from e
+
+    try:
+        system = PropertyAmenitySystem(
+            vlm_client=vlm_client,
+            db=db,
+            image_storage_dir=storage_dir,
+        )
+        img_record = system.process_one_image(
+            property_id=property_id,
+            image=pil_image,
+            filename=file.filename or "image.jpg",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("Single image processing failed for property '%s'", property_id)
+        raise HTTPException(status_code=500, detail=f"Image processing failed: {e}") from e
+
+    return SingleImageUploadResponse(
+        property_id=property_id,
+        image=_build_image_response(img_record),
+    )
+
+
+@router.post("/upload", response_model=UploadResponse, status_code=201, deprecated=True)
 def upload_property(
     files: list[UploadFile] = File(..., description="One or more property images"),
     name: str = Form(..., description="Human-readable property name (e.g. 'Frankfurt House 1')"),
@@ -208,6 +319,72 @@ def search_properties(
     ]
 
 
+@router.post("/{property_id}/describe", response_model=DescribeResponse)
+def regenerate_description(
+    property_id: str,
+    body: DescribeRequest,
+    db: Session = Depends(get_db),
+    registry: ModelRegistry = Depends(get_model_registry),
+    storage_dir: Path = Depends(get_image_storage_dir),
+) -> DescribeResponse:
+    """
+    Regenerate a property description from the user's edited amenity list.
+
+    Called after the user reviews and edits the detected amenities in the UI.
+    The VLM is asked to write a fresh description based only on the amenities
+    the user confirmed as present.
+
+    Args:
+        property_id: UUID of the existing property (must exist in the DB).
+        body:        Edited amenity list + the model to use for generation.
+
+    Returns:
+        DescribeResponse with the new description text.
+
+    Raises:
+        400: If the model is unknown.
+        404: If the property does not exist.
+        500: If VLM inference fails.
+    """
+    from db.models import Property as PropertyModel
+
+    prop = db.get(PropertyModel, property_id)
+    if prop is None:
+        raise HTTPException(status_code=404, detail=f"Property '{property_id}' not found.")
+
+    try:
+        vlm_client = registry.get(body.model_name)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    try:
+        system = PropertyAmenitySystem(
+            vlm_client=vlm_client,
+            db=db,
+            # storage_dir is required by PropertyAmenitySystem.__init__ (it calls mkdir).
+            # No images are written in this describe-only path.
+            image_storage_dir=storage_dir,
+        )
+        amenities_as_dicts = [
+            {"amenity_name": a.amenity_name, "room_type": a.room_type, "is_present": a.is_present}
+            for a in body.amenities
+        ]
+        description = system.generate_description_from_amenities(
+            amenities=amenities_as_dicts,
+            property_name=prop.name,
+            extra_info=prop.extra_info,
+            num_rooms=body.num_rooms,
+            has_kitchen=body.has_kitchen,
+            has_balcony=body.has_balcony,
+            has_living_room=body.has_living_room,
+        )
+    except Exception as e:
+        logger.exception("Description regeneration failed for property '%s'", property_id)
+        raise HTTPException(status_code=500, detail=f"Description generation failed: {e}") from e
+
+    return DescribeResponse(description=description)
+
+
 @router.get("/{property_id}", response_model=PropertyDetailResponse)
 def get_property(
     property_id: str,
@@ -279,24 +456,7 @@ def _build_detail_response(prop: object) -> PropertyDetailResponse:
 
     assert isinstance(prop, PropertyModel)
 
-    image_responses = [
-        PropertyImageResponse(
-            id=img.id,
-            file_path=img.file_path,
-            room_type=img.room_type,
-            amenities=[
-                DetectedAmenityResponse(
-                    id=a.id,
-                    amenity_name=a.amenity_name,
-                    room_type=a.room_type,
-                    is_present=a.is_present,
-                    confidence=a.confidence,
-                )
-                for a in img.amenities
-            ],
-        )
-        for img in prop.images
-    ]
+    image_responses = [_build_image_response(img) for img in prop.images]
 
     return PropertyDetailResponse(
         id=prop.id,
@@ -306,4 +466,27 @@ def _build_detail_response(prop: object) -> PropertyDetailResponse:
         extra_info=prop.extra_info,
         created_at=prop.created_at,
         images=image_responses,
+    )
+
+
+def _build_image_response(img: object) -> PropertyImageResponse:
+    """Convert a PropertyImage ORM object into an API response schema."""
+    from db.models import PropertyImage as PropertyImageModel
+
+    assert isinstance(img, PropertyImageModel)
+
+    return PropertyImageResponse(
+        id=img.id,
+        file_path=img.file_path,
+        room_type=img.room_type,
+        amenities=[
+            DetectedAmenityResponse(
+                id=a.id,
+                amenity_name=a.amenity_name,
+                room_type=a.room_type,
+                is_present=a.is_present,
+                confidence=a.confidence,
+            )
+            for a in img.amenities
+        ],
     )

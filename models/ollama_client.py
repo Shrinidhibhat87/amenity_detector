@@ -95,6 +95,9 @@ class OllamaClient(VLMClient):
         """
         img_b64 = self._image_to_base64(image)
 
+        # num_gpu=-1 tells Ollama to offload as many layers as possible to GPU.
+        # On a 6GB card like GTX 1660 Ti the full 7B model won't fit, but Ollama
+        # will still place partial layers on GPU, which is faster than pure CPU.
         payload = {
             "model": self._model,
             "messages": [
@@ -106,23 +109,30 @@ class OllamaClient(VLMClient):
                 }
             ],
             "stream": False,  # Wait for the full response before returning
+            "options": {"num_gpu": -1},  # use GPU layers where VRAM allows
         }
+
+        # 600s timeout: when the model falls back to CPU (e.g. VRAM too small for
+        # all layers), inference takes 3–5 minutes. 10 minutes gives enough headroom.
+        _timeout = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "600"))
 
         try:
             response = requests.post(
                 f"{self._base_url}/api/chat",
                 json=payload,
-                timeout=120,  # Vision models can be slow — allow up to 2 minutes
+                timeout=_timeout,
             )
             response.raise_for_status()
         except requests.exceptions.ConnectionError as e:
             raise RuntimeError(
                 f"Cannot connect to Ollama at {self._base_url}. "
-                "Is the Ollama server running? Try: ollama serve"
+                "Is the Ollama server running? Try: OLLAMA_HOST=0.0.0.0 ollama serve"
             ) from e
         except requests.exceptions.Timeout as e:
             raise RuntimeError(
-                f"Ollama request timed out after 120s for model '{self._model}'."
+                f"Ollama request timed out after {_timeout}s for model '{self._model}'. "
+                "The model may be running on CPU — this is slow on low-VRAM hardware. "
+                "Try a smaller model or increase OLLAMA_TIMEOUT_SECONDS."
             ) from e
         except requests.exceptions.HTTPError as e:
             raise RuntimeError(

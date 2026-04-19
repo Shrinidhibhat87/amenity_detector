@@ -1,16 +1,9 @@
-"""Imports for core modules and functionalities."""
+"""Core package.
 
-from .amenity_data_manager import AmenityDataManager
-from .amenity_detector import AmenityDetector
-from .amenity_schema import AMENITY_SCHEMA
-from .amenity_system import PropertyAmenitySystem
+Keep this module lightweight. It is executed before any ``core.*`` submodule
+import, including shared helpers used by the UI Docker image. Heavy imports such
+as ``amenity_data_manager`` pull in API-only packages like ``db`` and should be
+imported directly from their submodules instead.
+"""
 
-# from ..old_project.core.amenitystore import AmenityStore
-
-__all__ = [
-    "AmenityDataManager",
-    "AmenityDetector",
-    "AMENITY_SCHEMA",
-    "PropertyAmenitySystem",
-    # "AmenityStore",
-]
+__all__: list[str] = []
