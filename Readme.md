@@ -1,376 +1,324 @@
 # Amenity Detector
 
-An end-to-end pipeline that automatically identifies amenities in property images (e.g. Airbnb listings), stores results in PostgreSQL, and exposes a REST API. Built as a learning project for real-world AI Engineering practices.
+Amenity Detector is an end-to-end AI engineering project for analysing property
+photos. It detects visible amenities room by room, lets a user review and correct
+the model output, stores the result in PostgreSQL, and generates a listing-style
+property description.
 
-**Status**: Phases 0–5 complete. FastAPI backend + PostgreSQL + VLM abstraction (Ollama / Gemini) + Gradio UI + Prometheus/Grafana observability running via Docker Compose.
+The project is intentionally built like a small production system: FastAPI
+backend, Gradio frontend, PostgreSQL persistence, pluggable vision-language
+models, Docker Compose orchestration, structured logs, Prometheus metrics,
+Grafana dashboards, and CI checks.
 
----
+## Current State
 
-## What it does
+The local Docker Compose stack runs:
 
-1. Accept one or more property images via the Gradio UI or REST API
-2. Run amenity detection using a Vision-Language Model (Qwen2.5-VL-7B, LLaMA 3.2 Vision, or Gemini 2.0 Flash)
-3. Resize images before inference, then detect the room type and visible amenities in one VLM call per image
-4. Store property, image, and detection records in PostgreSQL
-5. Let the user review/edit detections and add structured hints before generating a natural-language description
-6. Allow browsing and searching properties by detected amenities
+| Component | Status | Purpose |
+|---|---:|---|
+| Gradio UI | Done | Upload, per-room amenity review, property hints, browse/search |
+| FastAPI API | Done | Property, image, model, search, and description endpoints |
+| PostgreSQL | Done | Stores properties, images, and detected amenities |
+| VLM clients | Done | Ollama and Gemini implementations behind a common interface |
+| Image preprocessing | Done | Resizes images before inference to reduce VLM latency |
+| Observability | Done | Structured logging, request logs, Prometheus, Grafana dashboard |
+| CI | Done | Ruff lint/format, mypy, and unit tests |
 
----
+Recent work added the Phase 5/6 flow:
 
-## Amenity Schema
+1. Create a property shell.
+2. Upload and process one image at a time.
+3. Detect room type and amenities from one structured JSON VLM response.
+4. Show incremental progress in the UI.
+5. Review amenities grouped by room.
+6. Confirm, edit, reject, or add amenities.
+7. Reconcile property hints against detections.
+8. Generate the final description from the reviewed state.
 
-Amenities are organised by room type and defined in `core/amenity_schema.py`:
+## Features
 
-| Room | Example amenities |
-|---|---|
-| Kitchen | refrigerator, oven, microwave, dishwasher, coffee_maker |
-| Living Room | sofa, tv, fireplace, projector, gaming_console |
-| Bedroom | bed, wardrobe, desk, air_conditioner, lamp |
-| Bathroom | toilet, shower, bathtub, hair_dryer, washing_machine |
-| Outdoor | patio, pool, garden, bbq_grill, parking_space |
-| Common | wifi, heating, smoke_detector, elevator |
+- Multi-image property upload through Gradio or REST.
+- Per-image processing endpoint for live progress updates.
+- Pluggable VLM layer:
+  - `gemini-2.0-flash`
+  - `qwen2.5vl:7b`
+  - `llama3.2-vision:11b`
+- Structured JSON amenity detection with confidence scores.
+- Room classification from the same VLM call as amenity detection.
+- Image preprocessing with longest-edge resize to 768 px.
+- Per-room review UI powered by `gr.render`.
+- Row-level actions: confirm, edit, reject, add amenity.
+- User hints for room count, kitchen, balcony, and living room.
+- Description regeneration from reviewed amenities and user hints.
+- Browse/search UI for stored properties.
+- FastAPI OpenAPI docs at `/docs`.
+- Prometheus metrics endpoint at `/metrics`.
+- Grafana dashboard provisioning through Docker Compose.
 
----
+## Architecture
 
-## Quick Start (Docker Compose)
+```text
+Browser
+  |
+  | http://localhost:7860
+  v
+Gradio UI
+  |
+  | REST calls
+  v
+FastAPI API
+  |             \
+  | SQLAlchemy   \ VLMClient
+  v               v
+PostgreSQL       Ollama or Gemini
+  |
+  v
+Stored property, image, and amenity records
+```
+
+The UI never imports API internals. It talks to the backend through HTTP only.
+The backend owns model selection, image storage, detection orchestration, and
+database writes.
+
+## Quick Start
 
 ### Prerequisites
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose v2)
-- [uv](https://github.com/astral-sh/uv) — for running tests and local dev outside Docker
-- At least one of:
-  - **Gemini API key** (free, 1500 req/day) — easiest to get started
-  - **Ollama** installed locally — for local GPU inference
+- Docker Desktop or Docker Engine with Docker Compose v2
+- `uv` for local tests and checks
+- At least one model backend:
+  - Gemini API key for `gemini-2.0-flash`
+  - Ollama running locally for `qwen2.5vl:7b` or `llama3.2-vision:11b`
 
-### 1. Get a Gemini API key (free)
-
-1. Go to [https://aistudio.google.com/](https://aistudio.google.com/)
-2. Click **Get API key** → **Create API key**
-3. Copy the key — you'll need it in step 3
-
-### 2. (Optional) Install Ollama for local GPU inference
-
-If you want to run Qwen2.5-VL-7B or LLaMA 3.2 Vision locally on your GPU:
-
-```bash
-# Install Ollama (Linux / WSL2)
-curl -fsSL https://ollama.com/install.sh | sh
-
-# Pull the models (choose one or both)
-# Qwen2.5-VL-7B: ~5GB download, fits in 6GB VRAM with 4-bit quantisation
-ollama pull qwen2.5vl:7b
-
-# LLaMA 3.2 Vision 11B: ~6.5GB — slightly over 6GB VRAM, Ollama offloads to CPU (slower)
-ollama pull llama3.2-vision:11b
-
-# Start the Ollama server (runs on http://localhost:11434)
-ollama serve
-```
-
-> **Note on GPU**: The models above work on a GTX 1660 Ti (6GB VRAM). Qwen2.5-VL-7B fits
-> comfortably. LLaMA 3.2 Vision 11B may be slow due to partial CPU offloading — use it to
-> experience the VRAM vs speed trade-off firsthand.
-
-### 3. Configure environment
+### Configure Environment
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and fill in your values:
+For Gemini:
 
 ```bash
-# Required for Gemini (leave empty if using Ollama only)
 GEMINI_API_KEY=your_key_here
+```
 
-# If Ollama is running natively on your machine (outside Docker):
+For Ollama from Docker Compose on WSL/Linux, start Ollama with host binding:
+
+```bash
+OLLAMA_HOST=0.0.0.0 ollama serve
+```
+
+Then set:
+
+```bash
 OLLAMA_BASE_URL=http://host.docker.internal:11434
-
-# Database — the defaults below match docker-compose.yml, no change needed
-DATABASE_URL=postgresql://amenity_user:amenity_pass@localhost:5432/amenity_db
-POSTGRES_USER=amenity_user
-POSTGRES_PASSWORD=amenity_pass
-POSTGRES_DB=amenity_db
-
-# Where uploaded images are stored (Docker mounts this as a volume)
-IMAGE_STORAGE_DIR=./storage/images
 ```
 
-### 4. Start the stack
+The default PostgreSQL values in `.env.example` match `docker-compose.yml`.
 
-```bash
-docker compose up
-```
-
-This starts:
-- **PostgreSQL 16** on port `5432` (data persists in a Docker volume)
-- **FastAPI backend** on port `8000`
-- **Gradio UI** on port `7860`
-- **Prometheus** on port `9090`
-- **Grafana** on port `3000`
-
-First run takes a minute to build the Docker image. Subsequent starts are instant.
-
-When changing frontend code in `ui/`, rebuild the `ui` service too:
-
-```bash
-docker compose up -d --build ui
-```
-
-Rebuilding only `api` does not update browser-visible Gradio code because the UI runs in a separate container.
-
-### 5. Verify it's working
-
-Open these in your browser after `docker compose up`:
-
-| Service | URL | Notes |
-|---|---|---|
-| **Gradio UI** | http://localhost:7860 | Main app — landing page + upload + browse |
-| **API docs** | http://localhost:8000/docs | Interactive FastAPI Swagger UI |
-| **Prometheus** | http://localhost:9090 | Metrics scraper |
-| **Grafana** | http://localhost:3000 | Dashboards (admin / admin) |
-
-Or run a quick health check:
-
-```bash
-curl http://localhost:8000/health
-# {"status":"ok","database":"ok","version":"1.0.0"}
-```
-
----
-
-## Testing the Redesigned UI
-
-Follow these steps to verify everything works end-to-end.
-
-### Prerequisites
-
-1. Docker Desktop (or Docker Engine + Compose v2) is running.
-2. In a WSL terminal, start Ollama **with host binding** so Docker can reach it:
-   ```bash
-   OLLAMA_HOST=0.0.0.0 ollama serve
-   ```
-3. Your `.env` file contains:
-   ```
-   OLLAMA_BASE_URL=http://host.docker.internal:11434
-   GEMINI_API_KEY=<your key, or leave blank to use Ollama only>
-   ```
-
-### Start the stack
+### Start the Stack
 
 ```bash
 docker compose up --build
 ```
 
-Wait until all health checks pass (~30 s). First build takes a few minutes.
+Open:
 
-### Test the landing page
+| Service | URL |
+|---|---|
+| Gradio UI | http://localhost:7860 |
+| FastAPI docs | http://localhost:8000/docs |
+| Prometheus | http://localhost:9090 |
+| Grafana | http://localhost:3000 |
 
-- Open http://localhost:7860
-- Verify the hero section loads with the amber/cream colour scheme
-- Verify the typewriter animation alternates between the two sentences
-- Click **"↑ Upload & Detect"** — confirms you land on the Upload tab
-- Click **"🔍 Browse Properties"** — confirms you land on the Browse tab
+Grafana uses the default local credentials unless changed in your environment:
 
-### Test the Upload flow (with Ollama)
-
-1. Click the **"↑ Upload & Detect"** tab
-2. Upload 2–3 room photos (JPEG or PNG)
-3. Enter a property name, e.g. `Test House`
-4. Select **qwen2.5vl:7b** from the model dropdown
-5. Fill optional **Property Hints** while detection is running:
-   - Set number of rooms to `2` or `3`
-   - Set Kitchen / Balcony / Living room to `Yes`, `No`, or `Not specified`
-6. Click **"↑ Upload & Detect Amenities"**
-7. Verify the progress bar advances after each image, rather than waiting silently for the full batch
-8. Verify the amenity table populates incrementally with rooms and amenities
-9. Change a hint to contradict the table, for example set **Balcony = No** when a balcony row is present; warning markers should appear on the mismatched rows
-10. Toggle a few checkboxes on/off in the Present column
-11. Click **"✔ Confirm & Generate Description"**
-12. Verify the step indicator reaches step 4 (Generate Description)
-13. Verify a description appears in the text box below and reflects the confirmed amenities plus any hints you provided
-
-### Test the Browse flow
-
-1. Click the **"🔍 Browse Properties"** tab
-2. Click **"List All"** — verify your uploaded property appears
-3. Copy the property ID from the table
-4. Paste it into the **Property ID** field and click **"View Details"**
-5. Verify the room and amenity breakdown appears
-
-### Gemini quota note
-
-The Gemini 2.0 Flash free tier has a daily request limit (~1500 req/day per project).
-If you see `429 RESOURCE_EXHAUSTED` in `docker compose logs api`, the quota has been
-exhausted for today. Switch to `qwen2.5vl:7b` or wait until the next day — the quota
-resets at midnight Pacific Time.
-
-### Check logs for errors
-
-```bash
-docker compose logs api --tail=50
+```text
+admin / admin
 ```
 
-There should be **no** `Cannot connect to Ollama at http://localhost:11434` errors.
-If you see them, verify your `.env` has `OLLAMA_BASE_URL=http://host.docker.internal:11434`
-and restart:
+### Health Check
 
 ```bash
-docker compose down && docker compose up
+curl http://localhost:8000/health
 ```
 
----
+Expected shape:
 
-## API Endpoints
+```json
+{"status":"ok","database":"ok","version":"1.0.0"}
+```
 
-| Method | Path | Description |
+## Using The App
+
+1. Open http://localhost:7860.
+2. Go to `Upload & Detect`.
+3. Upload 2-3 representative property images.
+4. Enter a property name.
+5. Select a model.
+6. Optionally fill property hints.
+7. Click `Upload & Detect Amenities`.
+8. Review the detected amenities grouped by room.
+9. Confirm, edit, reject, or add amenities as needed.
+10. Click `Confirm & Generate Description`.
+11. Use `Browse Properties` to list, search, and inspect stored properties.
+
+For faster demos, prefer Gemini. For local-model learning, use Ollama, but expect
+slower inference on low-VRAM GPUs.
+
+## API Overview
+
+| Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/v1/properties/` | Create an empty property shell before per-image processing |
-| `POST` | `/api/v1/properties/{id}/images` | Upload and process one image for an existing property |
-| `POST` | `/api/v1/properties/upload` | Deprecated batch upload; kept for backward compatibility |
-| `POST` | `/api/v1/properties/{id}/describe` | Regenerate description from edited amenity list and optional sidebar hints |
-| `GET` | `/api/v1/properties/` | List all properties (paginated) |
-| `GET` | `/api/v1/properties/{id}` | Full property details (images + amenities) |
-| `GET` | `/api/v1/properties/search?amenities=pool,wifi` | Filter by required amenities |
-| `DELETE` | `/api/v1/properties/{id}` | Remove a property |
-| `GET` | `/api/v1/models/` | List available VLMs and their status |
-| `GET` | `/health` | Liveness check |
+| `POST` | `/api/v1/properties/` | Create an empty property shell |
+| `POST` | `/api/v1/properties/{id}/images` | Upload and process one image |
+| `POST` | `/api/v1/properties/{id}/describe` | Regenerate description from reviewed amenities |
+| `POST` | `/api/v1/properties/upload` | Deprecated batch upload endpoint |
+| `GET` | `/api/v1/properties/` | List properties |
+| `GET` | `/api/v1/properties/{id}` | Get full property details |
+| `GET` | `/api/v1/properties/search` | Search by amenity names |
+| `DELETE` | `/api/v1/properties/{id}` | Delete a property |
+| `GET` | `/api/v1/models/` | List available models |
+| `GET` | `/health` | Health check |
+| `GET` | `/metrics` | Prometheus metrics |
 
-### Example: upload a property
+### Example: Per-Image Flow
+
+Create a property:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/properties/upload \
-  -F "name=Frankfurt House 1" \
-  -F "model_name=gemini-2.0-flash" \
-  -F "extra_info=2-bed flat near the city centre" \
-  -F "files=@/path/to/kitchen.jpg" \
-  -F "files=@/path/to/bedroom.jpg"
+curl -X POST http://localhost:8000/api/v1/properties/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Frankfurt Apartment",
+    "model_name": "gemini-2.0-flash",
+    "extra_info": "Two-bed flat near public transport"
+  }'
 ```
 
----
+Upload one image to the returned `property_id`:
 
-## Development
+```bash
+curl -X POST http://localhost:8000/api/v1/properties/<property_id>/images \
+  -F "model_name=gemini-2.0-flash" \
+  -F "file=@/path/to/kitchen.jpg"
+```
 
-### Install dependencies locally (for tests and linting)
+Generate a description from reviewed amenities:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/properties/<property_id>/describe \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_name": "gemini-2.0-flash",
+    "num_rooms": 2,
+    "has_kitchen": true,
+    "has_balcony": false,
+    "has_living_room": true,
+    "amenities": [
+      {"room_type": "kitchen", "amenity_name": "refrigerator", "is_present": true},
+      {"room_type": "living_room", "amenity_name": "sofa", "is_present": true}
+    ]
+  }'
+```
+
+## Local Development
+
+Install dependencies:
 
 ```bash
 uv sync --group dev
 ```
 
-### Run tests
+Run the API locally:
 
 ```bash
-# Unit tests only (fast, no Docker needed)
+uv run uvicorn api.main:app --reload
+```
+
+Run the UI locally:
+
+```bash
+API_BASE_URL=http://localhost:8000 uv run python -m ui.app
+```
+
+When changing UI code in Docker, rebuild the UI service:
+
+```bash
+docker compose up -d --build ui
+```
+
+Rebuilding only the API service does not update Gradio code because the UI runs
+in a separate container.
+
+## Quality Checks
+
+The GitHub Actions CI currently runs these commands:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy . --ignore-missing-imports
 uv run pytest tests/unit/ -v
+```
 
-# Integration tests (uses in-memory SQLite, no Docker needed)
-uv run pytest tests/integration/ -v
+For broader local verification:
 
-# Full suite
+```bash
 uv run pytest tests/ -v
 ```
 
-To run integration tests against a real PostgreSQL (must be running):
+Integration tests use an in-memory SQLite database by default. To run them
+against local PostgreSQL:
 
 ```bash
 TEST_DATABASE_URL=postgresql://amenity_user:amenity_pass@localhost:5432/amenity_db \
   uv run pytest tests/integration/ -v
 ```
 
-### Run checks
-
-```bash
-uv run ruff check .          # linting
-uv run ruff format .         # formatting
-uv run mypy . --ignore-missing-imports  # type checking
-```
-
-### Pre-commit hooks
-
-```bash
-uv run pre-commit install    # run once; ruff + mypy run before every commit after this
-```
-
-### Database migrations
-
-```bash
-# After changing db/models.py, generate a new migration:
-uv run alembic revision --autogenerate -m "describe your change"
-
-# Apply all pending migrations (also runs automatically in the Docker container):
-uv run alembic upgrade head
-```
-
----
-
 ## Project Structure
 
-```
+```text
 amenity_detector/
-├── api/                    # FastAPI app
-│   ├── main.py             # App entrypoint, lifespan, router registration
-│   ├── dependencies.py     # Dependency injection (DB session, model registry)
-│   ├── schemas.py          # Pydantic request/response models
-│   └── routers/
-│       ├── properties.py   # /api/v1/properties/* endpoints
-│       └── models.py       # /api/v1/models/ endpoint
-│
-├── core/                   # Business logic
-│   ├── amenity_schema.py   # Amenity definitions by room type
-│   ├── amenity_detector.py # Prompt engineering + VLM response parsing
-│   ├── amenity_data_manager.py  # SQLAlchemy CRUD operations
-│   └── amenity_system.py   # Upload pipeline orchestrator
-│
-├── models/                 # VLM abstraction layer
-│   ├── base.py             # VLMClient ABC + VLMResponse dataclass
-│   ├── ollama_client.py    # Ollama REST API client
-│   ├── gemini_client.py    # Google Gemini API client
-│   └── registry.py         # ModelRegistry (name → client mapping)
-│
-├── db/                     # Database layer
-│   ├── models.py           # SQLAlchemy ORM: Property, PropertyImage, DetectedAmenity
-│   ├── session.py          # Engine, SessionLocal, get_db()
-│   └── migrations/         # Alembic migration scripts
-│
-├── tests/
-│   ├── unit/               # Fast tests, no external dependencies
-│   └── integration/        # API + DB tests (in-memory SQLite)
-│
-├── ui/
-│   └── app.py              # Gradio frontend (landing page + Upload + Browse tabs)
-│
-├── monitoring/
-│   ├── prometheus.yml      # Prometheus scrape config
-│   └── grafana/            # Grafana provisioning (data source + dashboards)
-│
-├── docker/
-│   ├── Dockerfile.api      # FastAPI container
-│   └── Dockerfile.ui       # Gradio container
-│
-├── docker-compose.yml      # Full stack: db + api + ui + prometheus + grafana
-├── pyproject.toml          # uv dependencies + tool config
-└── .env.example            # Environment variable template
+├── api/                         # FastAPI app, schemas, routers, middleware
+├── core/                        # Detection, preprocessing, orchestration, CRUD
+├── db/                          # SQLAlchemy models, sessions, migrations
+├── models/                      # VLMClient interface and model clients
+├── ui/                          # Gradio frontend and review-state helpers
+├── monitoring/                  # Prometheus and Grafana provisioning
+├── docker/                      # API and UI Dockerfiles
+├── tests/                       # Unit and integration tests
+├── docker-compose.yml           # Local full-stack orchestration
+├── pyproject.toml               # Dependencies and tool config
+└── .github/workflows/ci.yml     # CI checks
 ```
 
----
+## Important Notes
+
+- `qwen2.5vl:7b` can be slow on 6 GB VRAM machines because Ollama may offload
+  layers to CPU.
+- The old batch upload endpoint remains available for compatibility but the UI
+  now uses the property-shell plus per-image upload flow.
+- `ARCHITECTURE.md`, `SPEC.md`, and internal design docs are intentionally
+  ignored by git.
+- Runtime uploads are stored under `storage/` and should not be committed.
 
 ## Roadmap
 
-| Phase | Status | Goal |
-|---|---|---|
-| 0 | ✅ Done | Cleanup: uv, pre-commit, CI, type safety |
-| 1 | ✅ Done | VLM abstraction: OllamaClient, GeminiClient, ModelRegistry |
-| 2 | ✅ Done | PostgreSQL + FastAPI REST API + Docker Compose |
-| 3 | ✅ Done | Gradio frontend: hero landing page, Upload & Detect, Browse |
-| 4 | ✅ Done | Observability: Prometheus metrics + Grafana dashboards |
-| 5 | Planned | Cloud migration: managed DB, object storage, CD pipeline |
+Completed:
 
----
+- Repository cleanup with `uv`, ruff, mypy, pytest, and CI.
+- VLM abstraction for Ollama and Gemini.
+- PostgreSQL-backed FastAPI service.
+- Docker Compose local stack.
+- Gradio upload and browse UI.
+- Per-image detection flow with incremental progress.
+- Per-room amenity review UI.
+- Structured logging, Prometheus metrics, and Grafana dashboards.
 
-## CI
+Next likely work:
 
-GitHub Actions runs on every push / pull request to `main`:
-- `ruff check` — linting
-- `ruff format --check` — formatting
-- `mypy` — static type checking
-- `pytest tests/unit/ tests/integration/` — all tests (no GPU or Docker needed)
+- Cloud deployment target and managed database/storage.
+- Hosted VLM strategy for faster demos.
+- Voice-assisted property search.
+- Richer property search and ranking.
