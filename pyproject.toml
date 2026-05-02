@@ -25,7 +25,8 @@ dependencies = [
     "uvicorn>=0.34.0",
     "python-multipart>=0.0.9",  # Required by FastAPI to accept file uploads (multipart/form-data)
 
-    # VLM clients — Ollama uses plain HTTP (requests), Gemini uses Google SDK
+    # VLM clients — OpenRouter via openai SDK (Phase 8); legacy Ollama/Gemini deps below
+    "openai>=1.30.0",             # OpenAI-compatible SDK reused for OpenRouter base URL
     "requests>=2.31.0",           # HTTP client for Ollama REST API calls
     "google-genai>=1.0.0",        # Gemini 2.0 Flash API (free tier: 1500 req/day). New SDK replacing google-generativeai.
 
