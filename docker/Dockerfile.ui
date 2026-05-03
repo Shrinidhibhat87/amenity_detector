@@ -27,8 +27,7 @@ COPY pyproject.toml uv.lock ./
 
 # Install runtime dependencies from the lockfile.
 # --no-group dev  skips ruff, mypy, pytest (not needed at runtime)
-# --no-group local-gpu  skips torch/transformers (not used by the UI)
-RUN uv sync --frozen --no-install-project --no-group dev --no-group local-gpu
+RUN uv sync --frozen --no-install-project --no-group dev
 
 # ── Stage 2: runtime image ────────────────────────────────────────────────────
 FROM python:3.11-slim AS runtime

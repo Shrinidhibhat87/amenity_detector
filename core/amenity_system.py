@@ -7,15 +7,11 @@ This class ties together the three main components:
   3. Image file storage — saves uploaded images to the local file store
 
 Usage:
-  This class is used directly by the FastAPI upload endpoint:
+  This class is used directly by the FastAPI property/image endpoints:
 
     system = PropertyAmenitySystem(vlm_client, db_session, amenity_schema, storage_dir)
-    result = system.process_upload(
-        images=[pil_image1, pil_image2],
-        filenames=["kitchen.jpg", "bedroom.jpg"],
-        property_name="Frankfurt House 1",
-        extra_info="Near city centre",
-    )
+    prop = system.create_property_shell(property_name="Frankfurt House 1", model_name="...")
+    image = system.process_one_image(property_id=prop.id, image=pil_image1, filename="kitchen.jpg")
 
 Design note:
   PropertyAmenitySystem is intentionally lightweight — it just calls the right
@@ -57,7 +53,7 @@ class PropertyAmenitySystem:
         Initialise the system with all required dependencies.
 
         Args:
-            vlm_client:         VLMClient instance (Ollama or Gemini).
+            vlm_client:         VLMClient instance.
             db:                 Active SQLAlchemy Session (per-request).
             image_storage_dir:  Directory where uploaded images will be saved.
                                 Created automatically if it doesn't exist.
@@ -82,122 +78,6 @@ class PropertyAmenitySystem:
         # Ensure the image storage directory exists
         self.storage_dir = Path(image_storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
-
-    def process_upload(
-        self,
-        images: list[Image],
-        filenames: list[str],
-        property_name: str,
-        model_name: str,
-        extra_info: str | None = None,
-    ) -> Property:
-        """
-        Run the full pipeline for a new property upload.
-
-        Steps:
-          1. Create a Property record in the database.
-          2. For each image:
-             a. Save the image file to the local file store.
-             b. Create a PropertyImage record.
-             c. Run amenity detection.
-             d. Save DetectedAmenity records.
-          3. Generate a property description from the last image's detection results.
-          4. Update the Property record with the description.
-          5. Commit everything to the database.
-
-        Args:
-            images:        List of PIL Image objects (one per uploaded file).
-            filenames:     Original filenames (same order as images).
-            property_name: Human-readable label for this property.
-            model_name:    Name of the VLM used (stored for auditing).
-            extra_info:    Optional free-text notes from the user.
-
-        Returns:
-            The fully populated Property ORM object (committed to the database).
-        """
-        self.logger.info(
-            "Processing upload: property=%r, model=%s, images=%d",
-            property_name,
-            model_name,
-            len(images),
-        )
-
-        # Step 1: Create the Property record (gets a UUID assigned via flush)
-        prop = self.data_manager.create_property(
-            name=property_name,
-            model_used=model_name,
-            extra_info=extra_info,
-        )
-
-        # Create a sub-folder per property so files don't collide
-        property_dir = self.storage_dir / prop.id
-        property_dir.mkdir(parents=True, exist_ok=True)
-
-        last_flat_amenities: dict[str, bool] = {}
-        last_image: Image | None = None
-
-        # Step 2: Process each image
-        for pil_image, filename in zip(images, filenames, strict=True):
-            # Step 2a: Save image file to disk
-            file_path = property_dir / filename
-            pil_image.save(file_path)
-
-            # Store path relative to storage root so it's portable (not an absolute path)
-            relative_path = str(Path(prop.id) / filename)
-
-            # Step 2b: Create PropertyImage record (room_type filled in after detection)
-            img_record = self.data_manager.save_image(
-                property_id=prop.id,
-                file_path=relative_path,
-                room_type=None,  # Will be detected below
-            )
-
-            # Step 2c: Run amenity detection
-            # detect_from_image returns three dicts:
-            #   amenities_by_room — results organised by room type (for room inference)
-            #   flat_amenities    — simple bool dict for all amenities
-            #   flat_confidences  — model confidence per amenity (0.0–1.0, Phase 4)
-            amenities_by_room, flat_amenities, flat_confidences = self.detector.detect_from_image(
-                pil_image
-            )
-            self.logger.info(
-                "Detected %d present amenities in %s",
-                sum(1 for v in flat_amenities.values() if v),
-                filename,
-            )
-
-            # Determine room type — take the room with the most detected amenities
-            detected_room = _infer_room_type(amenities_by_room)
-            img_record.room_type = detected_room
-
-            # Step 2d: Save detection results to the database (with confidence scores)
-            self.data_manager.save_amenities(
-                property_id=prop.id,
-                image_id=img_record.id,
-                amenities=flat_amenities,
-                room_type=detected_room,
-                confidences=flat_confidences,
-            )
-
-            # Track for description generation
-            last_flat_amenities = flat_amenities
-            last_image = pil_image
-
-        # Step 3: Generate description from the last processed image
-        if last_image is not None:
-            description = self.detector.generate_description(last_image, last_flat_amenities)
-        else:
-            description = "No images were processed."
-
-        # Step 4: Update Property description
-        self.data_manager.update_property_description(prop.id, description)
-
-        # Step 5: Commit the entire transaction
-        self.data_manager.db.commit()
-        self.data_manager.db.refresh(prop)
-
-        self.logger.info("Upload complete: property_id=%s", prop.id)
-        return prop
 
     def create_property_shell(
         self,

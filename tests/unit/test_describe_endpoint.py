@@ -71,7 +71,7 @@ def mock_vlm() -> MagicMock:
     mock = MagicMock()
     mock.generate.return_value = VLMResponse(
         raw_text="A lovely property with a sofa and a fridge.",
-        model_name="gemini-2.0-flash",
+        model_name="openai/gpt-4o-mini",
     )
     return mock
 
@@ -92,7 +92,7 @@ def client(
     """
     # Build a minimal registry that holds our mock VLM under the test model name
     registry = ModelRegistry()
-    registry._clients["gemini-2.0-flash"] = mock_vlm
+    registry._clients["openai/gpt-4o-mini"] = mock_vlm
 
     # Override all three dependencies that the describe endpoint uses
     app.dependency_overrides[get_db] = lambda: in_memory_db
@@ -124,7 +124,7 @@ def _make_property(db: Session, name: str = "Test House") -> Property:
     """
     prop = Property(
         name=name,
-        model_used="gemini-2.0-flash",
+        model_used="openai/gpt-4o-mini",
         extra_info=None,
     )
     db.add(prop)
@@ -147,7 +147,7 @@ def test_describe_returns_description(client: TestClient, in_memory_db: Session)
                 {"amenity_name": "Sofa", "room_type": "living_room", "is_present": True},
                 {"amenity_name": "Dishwasher", "room_type": "kitchen", "is_present": False},
             ],
-            "model_name": "gemini-2.0-flash",
+            "model_name": "openai/gpt-4o-mini",
         },
     )
 
@@ -170,7 +170,7 @@ def test_describe_passes_sidebar_hints_to_prompt(
             "amenities": [
                 {"amenity_name": "Sofa", "room_type": "living_room", "is_present": True},
             ],
-            "model_name": "gemini-2.0-flash",
+            "model_name": "openai/gpt-4o-mini",
             "num_rooms": 2,
             "has_kitchen": True,
             "has_balcony": False,
@@ -196,7 +196,7 @@ def test_describe_returns_404_for_unknown_property(client: TestClient) -> None:
         "/api/v1/properties/nonexistent-uuid/describe",
         json={
             "amenities": [],
-            "model_name": "gemini-2.0-flash",
+            "model_name": "openai/gpt-4o-mini",
         },
     )
 

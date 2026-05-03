@@ -35,7 +35,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
     Each log entry contains:
       - HTTP method (GET, POST, …)
-      - URL path (/api/v1/properties/upload)
+      - URL path (/api/v1/properties/{property_id}/images)
       - Query string (if any)
       - Response status code (200, 201, 400, 500, …)
       - Processing duration in milliseconds

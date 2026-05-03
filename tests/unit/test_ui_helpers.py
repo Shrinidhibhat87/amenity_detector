@@ -87,17 +87,20 @@ def test_get_available_models_fallback() -> None:
 
         models = _get_available_models()
 
-    assert isinstance(models, list)
-    assert len(models) > 0
-    assert "gemini-2.0-flash" in models
+    assert models == [
+        "openai/gpt-4o-mini",
+        "google/gemini-pro-1.5",
+        "meta-llama/llama-3.2-11b-vision-instruct",
+        "qwen/qwen2-vl-72b-instruct",
+    ]
 
 
 def test_get_available_models_filters_unavailable() -> None:
     """Only models with available=True are returned."""
     mock_response = MagicMock()
     mock_response.json.return_value = [
-        {"name": "gemini-2.0-flash", "available": True},
-        {"name": "qwen2.5vl:7b", "available": False},
+        {"name": "openai/gpt-4o-mini", "available": True},
+        {"name": "qwen/qwen2-vl-72b-instruct", "available": False},
     ]
 
     with patch("ui.app.requests.get", return_value=mock_response):
@@ -105,8 +108,8 @@ def test_get_available_models_filters_unavailable() -> None:
 
         models = _get_available_models()
 
-    assert models == ["gemini-2.0-flash"]
-    assert "qwen2.5vl:7b" not in models
+    assert models == ["openai/gpt-4o-mini"]
+    assert "qwen/qwen2-vl-72b-instruct" not in models
 
 
 def test_reconcile_flags_kitchen_when_user_says_no_kitchen() -> None:

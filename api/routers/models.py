@@ -31,17 +31,15 @@ class ModelInfo(BaseModel):
 
 # Static descriptions for each model — shown in the UI dropdown tooltip
 _MODEL_DESCRIPTIONS: dict[str, str] = {
-    "qwen2.5vl:7b": (
-        "Qwen 2.5 VL 7B (local via Ollama) — "
-        "good accuracy, fits in 6GB VRAM with 4-bit quantisation"
+    "openai/gpt-4o-mini": "GPT-4o Mini via OpenRouter — cheapest reliable JSON-mode option.",
+    "google/gemini-pro-1.5": (
+        "Gemini Pro 1.5 via OpenRouter — strong vision reasoning, JSON-safe."
     ),
-    "llama3.2-vision:11b": (
-        "LLaMA 3.2 Vision 11B (local via Ollama) — "
-        "higher quality but may need CPU offloading on 6GB GPU (slower)"
+    "meta-llama/llama-3.2-11b-vision-instruct": (
+        "Llama 3.2 11B Vision via OpenRouter — open-weights baseline."
     ),
-    "gemini-2.0-flash": (
-        "Gemini 2.0 Flash (Google API, free tier) — "
-        "no local GPU needed, fastest option, 1500 req/day free"
+    "qwen/qwen2-vl-72b-instruct": (
+        "Qwen2-VL 72B via OpenRouter — highest-capacity open-weights option."
     ),
 }
 

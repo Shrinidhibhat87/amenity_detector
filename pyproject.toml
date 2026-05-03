@@ -8,10 +8,6 @@ requires-python = ">=3.11"
 # Only include libraries that are actually imported in the codebase.
 # Anything not yet used (e.g. RAG, vector stores) goes in when the feature lands.
 dependencies = [
-    # Config management — Hydra reads config/config.yaml and injects into main()
-    "hydra-core>=1.3.0",
-    "omegaconf>=2.3.0",
-
     # Image handling — PIL used throughout the pipeline
     "Pillow>=9.5.0",
 
@@ -25,14 +21,13 @@ dependencies = [
     "uvicorn>=0.34.0",
     "python-multipart>=0.0.9",  # Required by FastAPI to accept file uploads (multipart/form-data)
 
-    # VLM clients — Ollama uses plain HTTP (requests), Gemini uses Google SDK
-    "requests>=2.31.0",           # HTTP client for Ollama REST API calls
-    "google-genai>=1.0.0",        # Gemini 2.0 Flash API (free tier: 1500 req/day). New SDK replacing google-generativeai.
+    # VLM + HTTP clients
+    "openai>=1.30.0",
+    "requests>=2.31.0",
 
     # Data handling
-    "pandas>=2.0.0",          # DataFrames in amenity_data_manager and amenity_system
-    "numpy>=1.25.0",          # Array ops in dataloader and utilities/retriever
-    "scikit-learn>=1.4.0",    # cosine_similarity in utilities/retriever.py
+    "pandas>=2.0.0",
+    "numpy>=1.25.0",
 
     # Web UI — Gradio replaces Streamlit in Phase 3
     # Gradio is purpose-built for ML demos: multimodal inputs, clean Python API,
@@ -46,24 +41,11 @@ dependencies = [
     # prometheus-fastapi-instrumentator adds a /metrics endpoint to FastAPI with
     # standard HTTP request/response histograms — scraped by Prometheus.
     "prometheus-fastapi-instrumentator>=6.0.0",
-
-    # Visualisation — used in dataloader/sunrgb_d.py for debug plots
-    "matplotlib>=3.8.0",
-]
-
-# ── Optional: local HuggingFace model inference (legacy LLaVA, not needed with Ollama) ──────
-# Install with: uv sync --group local-gpu
-# These are heavy (~5GB download) and require a CUDA-capable GPU.
-[dependency-groups]
-local-gpu = [
-    "torch>=2.4.0",
-    "transformers>=4.37.0",
-    "accelerate>=1.6.0",      # Enables device_map="auto" in from_pretrained()
-    "bitsandbytes>=0.45.0",   # Enables load_in_4bit=True for quantized loading
 ]
 
 # ── Development dependencies ──────────────────────────────────────────────────
 # Install with: uv sync --group dev
+[dependency-groups]
 dev = [
     "ruff>=0.4.0",        # Linting + formatting (replaces flake8, black, isort)
     "mypy>=1.10.0",       # Static type checker
@@ -104,7 +86,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 # Tell ruff which packages belong to THIS project so imports are sorted correctly.
-known-first-party = ["core", "model", "models", "api", "db", "ui", "utilities", "dataloader"]
+known-first-party = ["core", "models", "api", "db", "ui"]
 
 # ── Mypy: static type checking ────────────────────────────────────────────────
 [tool.mypy]
@@ -115,13 +97,6 @@ ignore_missing_imports = true  # torch, transformers etc. have incomplete stubs 
 
 # SQLAlchemy mypy plugin — enables type inference for mapped_column() and Mapped[]
 plugins = ["sqlalchemy.ext.mypy.plugin"]
-
-# Exclude legacy entry-points that pre-date the FastAPI rework.
-# main.py uses the old Hydra-based PropertyAmenitySystem interface which no
-# longer exists; streamlit/app.py is the old UI layer. Neither is part of
-# the current production code path and both would require significant
-# refactoring to satisfy mypy against the new API.
-exclude = ["^main\\.py$", "^streamlit/"]
 
 # ── Pytest: test runner configuration ────────────────────────────────────────
 [tool.pytest.ini_options]

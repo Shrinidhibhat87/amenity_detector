@@ -30,7 +30,7 @@ COPY pyproject.toml uv.lock ./
 # Install only runtime dependencies (not dev tools like ruff, mypy, pytest).
 # --no-install-project: don't install the project itself yet (just deps).
 # --frozen: use the exact versions from uv.lock (no resolution step).
-RUN uv sync --frozen --no-install-project --no-group dev --no-group local-gpu
+RUN uv sync --frozen --no-install-project --no-group dev
 
 # ── Stage 2: runtime image ────────────────────────────────────────────────────
 FROM python:3.11-slim AS runtime
@@ -58,7 +58,6 @@ COPY api/       ./api/
 COPY core/      ./core/
 COPY models/    ./models/
 COPY db/        ./db/
-COPY config/    ./config/
 COPY alembic.ini ./
 
 # Create the image storage directory — the volume mount point in Docker Compose

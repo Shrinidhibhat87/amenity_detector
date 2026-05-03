@@ -122,23 +122,11 @@ class PropertyCreateResponse(BaseModel):
     property: PropertyDetailResponse
 
 
-class SingleImageUploadResponse(BaseModel):
+class ImageDetectionResponse(BaseModel):
     """Response returned after processing one image for an existing property."""
 
     property_id: str
     image: PropertyImageResponse
-
-
-class UploadResponse(BaseModel):
-    """
-    Response returned after a successful property upload.
-
-    Includes the full property details so the client can immediately display results.
-    """
-
-    property_id: str
-    message: str
-    property: PropertyDetailResponse
 
 
 # ── Health check schema ───────────────────────────────────────────────────────

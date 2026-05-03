@@ -4,15 +4,15 @@ AmenityDataManager — service layer for all database read/write operations.
 Why a separate service layer instead of putting DB code in the router?
   - Testability: unit tests can instantiate AmenityDataManager with a test session
     without needing to spin up the full FastAPI app.
-  - Reuse: the same methods can be called from the CLI (main.py), the API (routers),
+  - Reuse: the same methods can be called from scripts, the API (routers),
     and future scripts without duplicating SQL logic.
   - Clarity: routers stay thin (HTTP concerns only); this class owns DB concerns.
 
 Usage pattern in FastAPI:
-    @router.post("/properties/upload")
+    @router.post("/properties")
     def upload(db: Session = Depends(get_db)):
         manager = AmenityDataManager(db)
-        prop = manager.create_property(name="My House", model_used="qwen2.5vl:7b")
+        prop = manager.create_property(name="My House", model_used="openai/gpt-4o-mini")
         ...
 """
 
@@ -60,7 +60,7 @@ class AmenityDataManager:
 
         Args:
             name:       Human-readable label for this property.
-            model_used: The VLM that will process this property (e.g., "qwen2.5vl:7b").
+            model_used: The VLM that will process this property (e.g., "openai/gpt-4o-mini").
             extra_info: Free-text notes from the user (location, number of rooms, etc.)
 
         Returns:
