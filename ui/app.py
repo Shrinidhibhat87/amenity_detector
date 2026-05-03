@@ -60,7 +60,7 @@ def _get_available_models() -> list[str]:
     Falls back to a hardcoded list if the backend is unreachable (e.g. cold start).
 
     Returns:
-        List of model name strings, e.g. ["gemini-2.0-flash", "qwen2.5vl:7b"].
+        List of model name strings, e.g. ["openai/gpt-4o-mini", "google/gemini-pro-1.5"].
     """
     try:
         response = requests.get(f"{_API_BASE_URL}/api/v1/models/", timeout=10)
@@ -68,7 +68,12 @@ def _get_available_models() -> list[str]:
         models_data: list[dict[str, Any]] = response.json()
         return [m["name"] for m in models_data if m.get("available")]
     except Exception:
-        return ["gemini-2.0-flash", "qwen2.5vl:7b", "llama3.2-vision:11b"]
+        return [
+            "openai/gpt-4o-mini",
+            "google/gemini-pro-1.5",
+            "meta-llama/llama-3.2-11b-vision-instruct",
+            "qwen/qwen2-vl-72b-instruct",
+        ]
 
 
 def _format_amenities_table(images: list[dict[str, Any]]) -> list[list[Any]]:
@@ -105,7 +110,7 @@ def _format_single_image_table(image: dict[str, Any]) -> list[list[Any]]:
     Convert one image response into amenity table rows.
 
     Args:
-        image: The ``image`` object from SingleImageUploadResponse.
+        image: The ``image`` object from the per-image detection response.
 
     Returns:
         List of rows matching the editable amenity table.
@@ -664,7 +669,7 @@ def confirm_and_describe(
           - description:  The newly generated description.
     """
     property_id = upload_state.get("property_id", "")
-    model_name = upload_state.get("model_name", "gemini-2.0-flash")
+    model_name = upload_state.get("model_name", "openai/gpt-4o-mini")
 
     if not property_id:
         return _step_html(2), "Upload images first before generating a description.", ""
@@ -1086,7 +1091,7 @@ def build_app() -> gr.Blocks:
         Configured gr.Blocks instance ready to launch.
     """
     available_models = _get_available_models()
-    default_model = available_models[0] if available_models else "gemini-2.0-flash"
+    default_model = available_models[0] if available_models else "openai/gpt-4o-mini"
 
     # In Gradio 6 the `theme=`, `css=` and `js=` parameters belong on launch(),
     # not on gr.Blocks() — passing them here raises a UserWarning. The hero
@@ -1125,7 +1130,7 @@ def build_app() -> gr.Blocks:
                             choices=available_models,
                             value=default_model,
                             label="AI Model",
-                            info="Ollama models need a running local Ollama server. Gemini needs GEMINI_API_KEY.",
+                            info="Models are served through OpenRouter. Set OPENROUTER_API_KEY in your environment.",
                         )
                         extra_info_input = gr.Textbox(
                             label="Additional Notes (optional)",

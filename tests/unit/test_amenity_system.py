@@ -5,8 +5,7 @@ These tests verify that PropertyAmenitySystem orchestrates the pipeline correctl
   - Creates a Property record in the DB
   - Saves images to the filesystem
   - Passes confidence scores from the detector to the data manager
-  - Generates and stores a property description
-  - The full process_upload() flow with mocked dependencies
+  - Supports the Phase 5 shell + per-image upload flow
 
 All external dependencies (VLM, DB, filesystem) are mocked so tests are fast and
 deterministic. We use tmp_path (pytest built-in fixture) for filesystem isolation.
@@ -62,11 +61,7 @@ def fake_vlm() -> MagicMock:
     )
     mock = MagicMock(spec=VLMClient)
     type(mock).model_name = property(lambda self: "fake-model")
-    # First call → amenity detection JSON; second call → description text
-    mock.generate.side_effect = [
-        VLMResponse(raw_text=fake_response, model_name="fake-model"),
-        VLMResponse(raw_text="A well-equipped kitchen.", model_name="fake-model"),
-    ]
+    mock.generate.return_value = VLMResponse(raw_text=fake_response, model_name="fake-model")
     return mock
 
 
@@ -127,22 +122,19 @@ class TestInferRoomType:
         assert result in ("kitchen", "bedroom")
 
 
-# ── process_upload ──────────────────────────────────────────────────────────
+# ── create_property_shell ───────────────────────────────────────────────────
 
 
-class TestProcessUpload:
+class TestCreatePropertyShell:
     def test_creates_property_record(
         self,
         system: PropertyAmenitySystem,
-        small_image: PILImage.Image,
         in_memory_db: Session,
     ):
-        """A Property row should exist in the DB after process_upload()."""
+        """A Property row should exist in the DB after create_property_shell()."""
         from db.models import Property
 
-        prop = system.process_upload(
-            images=[small_image],
-            filenames=["kitchen.jpg"],
+        prop = system.create_property_shell(
             property_name="Test House",
             model_name="fake-model",
         )
@@ -155,6 +147,34 @@ class TestProcessUpload:
         db_prop = in_memory_db.get(Property, prop.id)
         assert db_prop is not None
 
+    def test_stores_extra_info(
+        self,
+        system: PropertyAmenitySystem,
+    ):
+        """Optional extra_info from the user should be stored on the property."""
+        prop = system.create_property_shell(
+            property_name="Extra Info Test",
+            model_name="fake-model",
+            extra_info="City centre apartment",
+        )
+        assert prop.extra_info == "City centre apartment"
+
+    def test_creates_property_storage_directory(
+        self, system: PropertyAmenitySystem, tmp_path: Path
+    ):
+        """The shell flow should prepare a property-specific storage folder."""
+        prop = system.create_property_shell(
+            property_name="Storage Test",
+            model_name="fake-model",
+        )
+
+        assert (tmp_path / "images" / prop.id).exists()
+
+
+# ── process_one_image ───────────────────────────────────────────────────────
+
+
+class TestProcessOneImage:
     def test_saves_image_file_to_disk(
         self,
         system: PropertyAmenitySystem,
@@ -162,14 +182,16 @@ class TestProcessUpload:
         tmp_path: Path,
     ):
         """The uploaded image should be saved to the storage directory."""
-        prop = system.process_upload(
-            images=[small_image],
-            filenames=["bedroom.jpg"],
+        prop = system.create_property_shell(
             property_name="Storage Test",
             model_name="fake-model",
         )
+        system.process_one_image(
+            property_id=prop.id,
+            image=small_image,
+            filename="bedroom.jpg",
+        )
 
-        # File should be at storage_dir / property_id / filename
         expected_path = tmp_path / "images" / prop.id / "bedroom.jpg"
         assert expected_path.exists()
 
@@ -180,81 +202,70 @@ class TestProcessUpload:
         in_memory_db: Session,
     ):
         """DetectedAmenity rows should be created for the uploaded image."""
+        from sqlalchemy import select
+
         from db.models import DetectedAmenity
 
-        prop = system.process_upload(
-            images=[small_image],
-            filenames=["kitchen.jpg"],
+        prop = system.create_property_shell(
             property_name="Amenity Test",
             model_name="fake-model",
         )
-
-        from sqlalchemy import select
+        system.process_one_image(
+            property_id=prop.id,
+            image=small_image,
+            filename="kitchen.jpg",
+        )
 
         amenities = in_memory_db.scalars(
             select(DetectedAmenity).where(DetectedAmenity.property_id == prop.id)
         ).all()
         assert len(amenities) > 0
 
-    def test_stores_description(
+    def test_returns_image_record_with_detected_room(
         self,
         system: PropertyAmenitySystem,
         small_image: PILImage.Image,
     ):
-        """The property description should be set after processing."""
-        prop = system.process_upload(
-            images=[small_image],
-            filenames=["kitchen.jpg"],
-            property_name="Desc Test",
+        """The per-image flow should populate the inferred room type."""
+        prop = system.create_property_shell(
+            property_name="Room Test",
             model_name="fake-model",
         )
-        assert prop.description is not None
-        assert len(prop.description) > 0
 
-    def test_stores_extra_info(
+        img_record = system.process_one_image(
+            property_id=prop.id,
+            image=small_image,
+            filename="kitchen.jpg",
+        )
+
+        assert img_record.room_type == "kitchen"
+
+    def test_raises_for_unknown_property(
         self,
         system: PropertyAmenitySystem,
         small_image: PILImage.Image,
     ):
-        """Optional extra_info from the user should be stored on the property."""
-        prop = system.process_upload(
-            images=[small_image],
-            filenames=["img.jpg"],
-            property_name="Extra Info Test",
-            model_name="fake-model",
-            extra_info="City centre apartment",
-        )
-        assert prop.extra_info == "City centre apartment"
+        """Uploading to a missing property should fail clearly."""
+        with pytest.raises(ValueError, match="Property not found"):
+            system.process_one_image(
+                property_id="missing-property",
+                image=small_image,
+                filename="kitchen.jpg",
+            )
 
     def test_handles_multiple_images(
         self,
-        fake_vlm: MagicMock,
+        system: PropertyAmenitySystem,
+        small_image: PILImage.Image,
         in_memory_db: Session,
-        tmp_path: Path,
     ):
-        """Multiple images should each get their own PropertyImage record."""
-        # Provide enough VLM responses for 2 detection calls + 1 description call
-        fake_response = json.dumps({"refrigerator": True})
-        fake_vlm.generate.side_effect = [
-            VLMResponse(raw_text=fake_response, model_name="fake-model"),
-            VLMResponse(raw_text=fake_response, model_name="fake-model"),
-            VLMResponse(raw_text="Two-room property.", model_name="fake-model"),
-        ]
-        system = PropertyAmenitySystem(
-            vlm_client=fake_vlm,
-            db=in_memory_db,
-            image_storage_dir=tmp_path / "images",
-        )
-        images = [
-            PILImage.new("RGB", (16, 16), color=(100, 100, 100)),
-            PILImage.new("RGB", (16, 16), color=(200, 200, 200)),
-        ]
-        prop = system.process_upload(
-            images=images,
-            filenames=["kitchen.jpg", "bedroom.jpg"],
+        """Multiple uploads to the same shell should each get their own PropertyImage record."""
+        prop = system.create_property_shell(
             property_name="Multi Image",
             model_name="fake-model",
         )
+        system.process_one_image(property_id=prop.id, image=small_image, filename="kitchen.jpg")
+        system.process_one_image(property_id=prop.id, image=small_image, filename="bedroom.jpg")
 
         from sqlalchemy import func, select
 

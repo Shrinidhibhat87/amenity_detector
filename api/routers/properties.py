@@ -2,7 +2,6 @@
 Properties router — handles all /api/v1/properties/* endpoints.
 
 Endpoints:
-  POST   /api/v1/properties/upload          Upload images + trigger detection
   POST   /api/v1/properties/{id}/describe   Regenerate description from edited amenity list
   GET    /api/v1/properties/                List all properties (paginated)
   GET    /api/v1/properties/search          Filter by required amenities
@@ -29,13 +28,12 @@ from api.schemas import (
     DescribeRequest,
     DescribeResponse,
     DetectedAmenityResponse,
+    ImageDetectionResponse,
     PropertyCreateRequest,
     PropertyCreateResponse,
     PropertyDetailResponse,
     PropertyImageResponse,
     PropertySummaryResponse,
-    SingleImageUploadResponse,
-    UploadResponse,
 )
 from core.amenity_data_manager import AmenityDataManager
 from core.amenity_system import PropertyAmenitySystem
@@ -94,7 +92,7 @@ def create_property(
     )
 
 
-@router.post("/{property_id}/images", response_model=SingleImageUploadResponse, status_code=201)
+@router.post("/{property_id}/images", response_model=ImageDetectionResponse, status_code=201)
 def upload_property_image(
     property_id: str,
     file: UploadFile = File(..., description="One property image"),
@@ -102,7 +100,7 @@ def upload_property_image(
     db: Session = Depends(get_db),
     registry: ModelRegistry = Depends(get_model_registry),
     storage_dir: Path = Depends(get_image_storage_dir),
-) -> SingleImageUploadResponse:
+) -> ImageDetectionResponse:
     """
     Upload and process one image for an existing property.
 
@@ -149,109 +147,9 @@ def upload_property_image(
         logger.exception("Single image processing failed for property '%s'", property_id)
         raise HTTPException(status_code=500, detail=f"Image processing failed: {e}") from e
 
-    return SingleImageUploadResponse(
+    return ImageDetectionResponse(
         property_id=property_id,
         image=_build_image_response(img_record),
-    )
-
-
-@router.post("/upload", response_model=UploadResponse, status_code=201, deprecated=True)
-def upload_property(
-    files: list[UploadFile] = File(..., description="One or more property images"),
-    name: str = Form(..., description="Human-readable property name (e.g. 'Frankfurt House 1')"),
-    model_name: str = Form(
-        ..., description="VLM to use for detection (e.g. 'qwen2.5vl:7b' or 'gemini-2.0-flash')"
-    ),
-    extra_info: str | None = Form(
-        None, description="Optional notes (location, number of rooms, etc.)"
-    ),
-    db: Session = Depends(get_db),
-    registry: ModelRegistry = Depends(get_model_registry),
-    storage_dir: Path = Depends(get_image_storage_dir),
-) -> UploadResponse:
-    """
-    Upload property images, run amenity detection, and store results.
-
-    This is the primary endpoint of the whole application. It:
-      1. Validates the uploaded files (image format check)
-      2. Looks up the requested VLM in the registry
-      3. Delegates the full pipeline to PropertyAmenitySystem
-      4. Returns the newly created property with all detection results
-
-    Args:
-        files:      One or more image files (JPEG, PNG, or WebP).
-        name:       Property name shown in the Browse tab.
-        model_name: Which VLM to use. Must be one of the registered models.
-        extra_info: Optional free-text context about the property.
-        db:         Database session (injected per-request).
-        registry:   Model registry (injected once at startup).
-        storage_dir:Directory for saving images (from IMAGE_STORAGE_DIR env var).
-
-    Returns:
-        UploadResponse containing the property ID and full detection results.
-
-    Raises:
-        400: If no files uploaded, a file is not an image, or the model is unknown.
-        500: If VLM inference or DB write fails.
-    """
-    if not files:
-        raise HTTPException(status_code=400, detail="At least one image file is required.")
-
-    # Validate all files before doing any heavy work
-    for f in files:
-        if f.content_type not in _ALLOWED_CONTENT_TYPES:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"File '{f.filename}' has unsupported type '{f.content_type}'. "
-                    f"Allowed: {sorted(_ALLOWED_CONTENT_TYPES)}"
-                ),
-            )
-
-    # Resolve the requested VLM client — fail fast if unavailable
-    try:
-        vlm_client = registry.get(model_name)
-    except KeyError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-    # Read all files into memory as PIL Images
-    pil_images: list[Image.Image] = []
-    filenames: list[str] = []
-    for upload in files:
-        raw = upload.file.read()
-        try:
-            pil_images.append(Image.open(io.BytesIO(raw)).convert("RGB"))
-        except Exception as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Could not decode image '{upload.filename}': {e}",
-            ) from e
-        filenames.append(upload.filename or f"image_{len(filenames)}.jpg")
-
-    # Run the full pipeline
-    try:
-        system = PropertyAmenitySystem(
-            vlm_client=vlm_client,
-            db=db,
-            image_storage_dir=storage_dir,
-        )
-        prop = system.process_upload(
-            images=pil_images,
-            filenames=filenames,
-            property_name=name,
-            model_name=model_name,
-            extra_info=extra_info,
-        )
-    except Exception as e:
-        logger.exception("Upload pipeline failed for property '%s'", name)
-        raise HTTPException(status_code=500, detail=f"Processing failed: {e}") from e
-
-    # Build the detail response, mapping ORM objects → Pydantic schemas
-    detail = _build_detail_response(prop)
-    return UploadResponse(
-        property_id=prop.id,
-        message=f"Property '{prop.name}' processed successfully.",
-        property=detail,
     )
 
 

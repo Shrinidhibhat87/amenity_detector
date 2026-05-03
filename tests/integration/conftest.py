@@ -106,8 +106,11 @@ def mock_vlm_client() -> VLMClient:
     )
 
     client = MagicMock(spec=VLMClient)
-    type(client).model_name = property(lambda self: "fake-model")
-    client.generate.return_value = VLMResponse(raw_text=fake_response_json, model_name="fake-model")
+    type(client).model_name = property(lambda self: "openai/gpt-4o-mini")
+    client.generate.return_value = VLMResponse(
+        raw_text=fake_response_json,
+        model_name="openai/gpt-4o-mini",
+    )
     return client
 
 
@@ -117,7 +120,7 @@ def mock_registry(mock_vlm_client: VLMClient) -> ModelRegistry:
     A ModelRegistry containing only the fake VLM client.
     """
     registry = ModelRegistry()
-    registry._clients["fake-model"] = mock_vlm_client
+    registry._clients["openai/gpt-4o-mini"] = mock_vlm_client
     return registry
 
 
