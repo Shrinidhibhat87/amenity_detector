@@ -15,10 +15,11 @@ This document defines the rework of the Amenity Detector project from a quick pr
 | Package manager | `uv` | Faster than pip, modern Python packaging, reproducible lockfile |
 | Frontend | Gradio + FastAPI | Python-only, purpose-built for ML demos, clean API separation |
 | Database | PostgreSQL (Docker) | Mirrors production patterns; swap connection string to go to cloud |
-| VLM provider | OpenRouter (OpenAI-compatible) | Single API key, four models behind one client, no local GPU constraint |
+| Local VLM serving | Ollama | Handles model downloads, quantization, and unified API automatically |
+| Cloud VLM | Gemini 2.0 Flash API | Free up to 1500 req/day, no GPU required, fastest option |
 | Deployment target | Local (Docker Compose) → Cloud later | Design for portability from day one |
 | CI/CD | GitHub Actions | Free, integrates with existing GitHub repo |
-| Config | `.env` for secrets only | No Hydra; runtime config is environment variables |
+| Config | Hydra + `.env` for secrets | Flexible config, secrets kept out of code |
 
 ---
 
@@ -40,20 +41,21 @@ This document defines the rework of the Amenity Detector project from a quick pr
 │               │    Layer       │  │(port 5432│  │(images/local)│   │
 │               └───────┬───────┘  └──────────┘  └──────────────┘   │
 │                        │                                             │
-│                        ▼                                             │
-│             ┌──────────────────────────┐                            │
-│             │ OpenRouter API (external) │                           │
-│             │  openai/gpt-4o-mini       │                           │
-│             │  google/gemini-pro-1.5    │                           │
-│             │  meta-llama/llama-3.2-11b │                           │
-│             │  qwen/qwen2-vl-72b        │                           │
-│             └──────────────────────────┘                            │
+│              ┌─────────┴──────────┐                                 │
+│              ▼                    ▼                                  │
+│   ┌──────────────────┐   ┌──────────────────┐                      │
+│   │   Ollama Server   │   │  Gemini API      │                      │
+│   │   (port 11434)    │   │  (external)      │                      │
+│   │  - Qwen2.5-VL-7B │   │  - Flash 2.0     │                      │
+│   │  - LLaMA 3.2 11B  │   └──────────────────┘                     │
+│   └──────────────────┘                                              │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-> **Why one provider**: OpenRouter exposes every supported model through a
-> single OpenAI-compatible endpoint. Switching models is a string change in
-> the registry; no GPU, no local server, no per-provider SDK.
+> **Note on GPU constraints**: The GTX 1660 Ti has 6GB VRAM. With Ollama's default 4-bit quantization (Q4_K_M):
+> - Qwen2.5-VL-7B: ~5GB VRAM — fits comfortably.
+> - LLaMA 3.2 Vision 11B: ~6.5GB — slightly over; Ollama will offload some layers to CPU (works, but slower). This is a valuable learning experience: you'll directly see the VRAM/speed trade-off.
+> - Gemini 2.0 Flash: No GPU needed — useful as a fast baseline.
 
 ---
 
@@ -79,7 +81,8 @@ amenity_detector/
 ├── models/                     # VLM abstraction layer
 │   ├── __init__.py
 │   ├── base.py                 # Abstract VLMClient interface
-│   └── openrouter_client.py    # OpenAI-compatible OpenRouter client
+│   ├── ollama_client.py        # Ollama API client (Qwen, LLaMA)
+│   └── gemini_client.py        # Google Generative AI client
 │
 ├── db/                         # Database layer
 │   ├── __init__.py
@@ -101,7 +104,8 @@ amenity_detector/
 │
 ├── docker/
 │   ├── Dockerfile.api          # FastAPI service
-│   └── Dockerfile.ui           # Gradio service
+│   ├── Dockerfile.ui           # Gradio service
+│   └── Dockerfile.ollama       # Ollama + model pre-pull
 │
 ├── .github/
 │   └── workflows/
@@ -175,14 +179,11 @@ class VLMClient(ABC):
         ...
 ```
 
-One concrete implementation:
-1. `OpenRouterVLMClient` — uses the `openai` SDK against
-   `https://openrouter.ai/api/v1`. The constructor takes the model id
-   (e.g. `openai/gpt-4o-mini`) and a `json_mode` flag.
+Three concrete implementations:
+1. `OllamaClient` — calls `http://localhost:11434` (Qwen2.5-VL-7B or LLaMA 3.2 Vision)
+2. `GeminiClient` — calls Google Generative AI API (Gemini 2.0 Flash)
 
-`ModelRegistry` holds a list of supported model ids and instantiates the
-client lazily per id. Adding a new model means appending one entry to
-`AVAILABLE_MODELS`.
+A `ModelRegistry` will hold the mapping from model name (string from config/UI) to the right client instance. This makes model switching a config change, not a code change.
 
 ---
 
@@ -191,9 +192,7 @@ client lazily per id. Adding a new model means appending one entry to
 ### Properties
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/v1/properties/` | Create an empty property shell (name + model) |
-| `POST` | `/api/v1/properties/{id}/images` | Upload and process one image |
-| `POST` | `/api/v1/properties/{id}/describe` | Regenerate description from reviewed amenities |
+| `POST` | `/api/v1/properties/upload` | Upload images + optional metadata; triggers amenity detection |
 | `GET` | `/api/v1/properties/` | List all properties (paginated) |
 | `GET` | `/api/v1/properties/{id}` | Get full property details (amenities, description, images) |
 | `GET` | `/api/v1/properties/search` | Filter by amenities (e.g., `?amenities=pool,wifi`) |
@@ -219,7 +218,7 @@ Two tabs:
 - Image upload (multi-file supported)
 - Text field: "Property name"
 - Text area: "Additional info / notes" (e.g., "This is a 2-bed flat in Frankfurt, has central heating")
-- Dropdown: "Select VLM" (GPT-4o Mini | Gemini Pro 1.5 | Llama 3.2 11B Vision | Qwen2-VL 72B)
+- Dropdown: "Select VLM" (Qwen2.5-VL-7B | LLaMA 3.2 Vision | Gemini 2.0 Flash)
 - Submit button → shows detected amenities per room + generated description
 
 ### Tab 2 — Browse Properties
@@ -387,78 +386,19 @@ Two tabs:
 
 ---
 
-### Phase 8 — OpenRouter migration and project cleanup (active)
-
-**Goal**: Collapse the multi-provider VLM layer (Ollama + Gemini) into one
-OpenRouter-backed client, and delete every legacy file that is no longer on
-the live Docker Compose path.
-
-**Design doc**: `docs/superpowers/specs/2026-05-02-openrouter-migration-and-cleanup-design.md`.
-
-**What we're building**:
-
-1. New `models/openrouter_client.py` — `OpenRouterVLMClient` implementing
-   `VLMClient`. Uses the `openai` SDK pointed at
-   `https://openrouter.ai/api/v1`. Sends images as base64 data URLs in
-   `image_url` blocks. Honours `json_mode=True` for GPT-4o-mini and Gemini.
-2. `models/registry.py` rewrite. `AVAILABLE_MODELS` lists four entries:
-   `openai/gpt-4o-mini`, `google/gemini-pro-1.5`,
-   `meta-llama/llama-3.2-11b-vision-instruct`, `qwen/qwen2-vl-72b-instruct`.
-   `from_env()` instantiates one `OpenRouterVLMClient` per id.
-3. Delete legacy code: `streamlit/`, `model/`, `dataloader/`, `utilities/`,
-   `main.py`, `config/`, `amenity_detector.db`, `models/ollama_client.py`,
-   `models/gemini_client.py`, related tests.
-4. Delete the deprecated batch endpoint
-   `POST /api/v1/properties/upload`, the `UploadResponse` schema,
-   `PropertyAmenitySystem.process_upload()`, and integration tests for the
-   removed route.
-5. Dependency cleanup: add `openai>=1.30.0`; drop `google-genai`,
-   `hydra-core`, `omegaconf`, `matplotlib`, `scikit-learn`, the `local-gpu`
-   group, and matching mypy/ruff configuration.
-6. Environment cleanup: remove `GEMINI_API_KEY` and `OLLAMA_BASE_URL` from
-   `.env`, `.env.example`, `docker-compose.yml`, and `Dockerfile.api`. Add
-   `OPENROUTER_API_KEY`. Drop `extra_hosts` from the `api` service.
-7. Documentation refresh: this `SPEC.md` (you're reading it),
-   `Readme.md`, and `ARCHITECTURE.md` reflect the OpenRouter-only stack and
-   the new test workflow.
-
-**Testing discipline**:
-
-- Unit: new `test_openrouter_client.py` (constructor, `json_mode` flag, SDK
-  errors → `RuntimeError`); updated `test_model_registry.py` (four ids,
-  unknown id raises `KeyError`); deleted `test_ollama_client.py` and
-  `test_gemini_client.py`.
-- Integration: keep per-image and `/describe` coverage; delete the
-  `/upload` cases.
-- Manual: `docker compose up --build`, hit the UI, run an upload with
-  `openai/gpt-4o-mini`, confirm description and Browse tab.
-
-**Implementation order**:
-
-1. `OpenRouterVLMClient` + unit tests.
-2. Registry rewrite + tests.
-3. Update `api/routers/models.py` descriptions and `ui/app.py` fallback.
-4. Delete dead code + tests; full suite green.
-5. Delete `/upload` route, schema, system method, and tests.
-6. Update `pyproject.toml`, `.env.example`, `docker-compose.yml`,
-   `Dockerfile.api`.
-7. Refresh `Readme.md`, `ARCHITECTURE.md`.
-8. `docker compose up --build` smoke run.
-
-**Deliverable**: `docker compose up --build` runs the full flow against
-OpenRouter. The repository contains only files used by the live pipeline.
-Tests, lint, and type checks pass. README documents how to test the new
-flow end-to-end.
-
----
-
-### Phase 9 — Cloud Migration & Model Serving (future)
+### Phase 7 — Cloud Migration & Model Serving (future)
 **Goal**: Deploy to a cloud provider without major code changes, and fix the model-serving bottleneck that makes local demos frustrating.
 
-**Context** (after Phase 8):
-- Phase 8 removed the local-GPU bottleneck by routing every model through
-  OpenRouter. The remaining cloud work is hosting the FastAPI/UI containers
-  and the database/storage.
+**Context** (from Phase 6 branch):
+- Gemini 2.5 Flash free tier was cut to **20 RPD** — no longer a viable demo path for even one multi-image upload.
+- Local Ollama on the GTX 1660 Ti spills `qwen2.5vl:7b` to CPU; inference takes 3–5 min per image and feels broken.
+- We need a hosted VLM endpoint that's either (a) truly free at realistic demo volumes, or (b) cheap pay-per-second GPU with scale-to-zero.
+
+**Candidate model-serving strategies** (pick one after a quick spike):
+- **Modal.com** — serverless Python, ~€0.0006/GPU-second on A10G, scale-to-zero. Wrap Qwen2.5-VL-7B in a Modal function, point a new `ModalClient` at it. Good learning path.
+- **Replicate** — similar model, simpler API (HTTPS + token). Slightly pricier, no cold-start control.
+- **AWS Bedrock / Vertex AI** — managed Claude / Gemini vision endpoints. Zero ops, paid, no open-weights.
+- **Upgraded Gemini billing** — 1k+ RPD, minimum code change, one setting flip.
 
 **Cloud deployment tasks**:
 - [ ] Choose cloud provider (AWS/GCP free tier or Fly.io for the app containers).
@@ -466,8 +406,7 @@ flow end-to-end.
 - [ ] Replace local image store with object storage (S3 / GCS / R2).
 - [ ] Deploy FastAPI + Gradio containers to a cloud container service.
 - [ ] Add GitHub Actions CD pipeline that deploys on merge to `main`.
-- [ ] Optionally add a self-hosted endpoint as a second `VLMClient` for cost
-      comparison.
+- [ ] Land the chosen model-serving strategy as a new `VLMClient` subclass.
 
 ---
 
@@ -483,8 +422,8 @@ flow end-to-end.
 | DB migrations | Alembic | latest |
 | Database | PostgreSQL | 16 |
 | Config | Hydra-core | 1.3+ |
-| VLM provider | OpenRouter (OpenAI-compatible) | — |
-| VLM SDK | `openai` | 1.30+ |
+| Local VLM serving | Ollama | latest |
+| VLM SDK (Gemini) | `google-genai` | latest (switched from deprecated google-generativeai) |
 | Linting | `ruff` | latest |
 | Type checking | `mypy` | latest |
 | Testing | `pytest` + `httpx` | latest |
@@ -506,25 +445,69 @@ flow end-to-end.
 
 1. **Image storage in cloud**: S3 vs GCS — depends on which cloud provider you pick in Phase 6. No decision needed now.
 2. **Confidence scoring**: The VLMs return free-text, not structured scores. Resolved in Phase 4 (VLM returns `{"present": bool, "confidence": float}` per amenity).
-3. **LLaMA 3.2 Vision 11B on 6GB VRAM**: Closed in Phase 8. All inference now runs through OpenRouter; the local-GPU path is gone.
+3. **LLaMA 3.2 Vision 11B on 6GB VRAM**: May require CPU offloading (slow). We'll measure latency during Phase 1 and document findings. If too slow, we drop to Qwen2.5-VL-7B as the sole local option.
 4. **Zero-shot room classifier** *(deferred from Phase 5 Q1 option C)*: Use a small CLIP-style model to pick the room type before the VLM runs, so the VLM can focus only on amenity checks. Likely a meaningful speed win, but introduces a new model dependency. Revisit after measuring Phase 5 numbers.
 5. **EXIF auto-orient + RGB conversion** *(deferred from Phase 5 Q4b)*: Not part of Phase 5 preprocessing (resize only). Worth adding when rotated phone photos are observed in the wild, or when a VLM rejects images with alpha channels. Cheap, correctness-focused win — just no evidence we need it yet.
 6. **Image processing parallelism** *(deferred from Phase 5 Q5)*: `concurrent.futures.ThreadPoolExecutor` across per-image calls. Helps most with paid Gemini or cloud GPUs; Ollama on the GTX 1660 Ti is VRAM-bound and won't benefit. Revisit once Phase 5 gives us baseline numbers.
 
 ---
 
-## Choosing An OpenRouter Model
+## Latency Optimisation Recommendations
 
-| Model id | Best for | JSON mode |
+> **Context:** On a GTX 1660 Ti (6 GB VRAM), `qwen2.5vl:7b` cannot fit its full compute graph (6.7 GB needed) into VRAM, so Ollama falls back to CPU-only inference. Each image takes 3–5 minutes. This section documents how to improve that, ordered from zero-cost to low-budget options.
+
+### Why is it so slow?
+
+The pipeline bottleneck is **sequential VLM inference**: every image goes to the model one at a time, and the model lives mostly on CPU. Two independent problems need fixing:
+
+1. **VRAM overflow** → model runs on CPU → each call takes 3–5 min instead of 5–15 s on GPU.
+2. **Sequential processing** → 8 images × 3 min = 24 min total.
+
+---
+
+### Free options (no money required)
+
+| Option | Expected speedup | How |
 |---|---|---|
-| `openai/gpt-4o-mini` | Cheapest reliable JSON output; the default. | Yes |
-| `google/gemini-pro-1.5` | Strong vision reasoning, JSON-safe. | Yes |
-| `meta-llama/llama-3.2-11b-vision-instruct` | Open-weights baseline. | No (parser handles plain JSON) |
-| `qwen/qwen2-vl-72b-instruct` | Highest-capacity open-weights option. | No (parser handles plain JSON) |
+| **Use Gemini API** | ~50× faster (seconds/image) | Free tier: 1500 req/day, 15 req/min. Already implemented — just select `gemini-2.0-flash` in the UI. Quota resets daily at midnight Pacific. |
+| **Resize images before inference** | 20–40% faster | VLMs don't benefit from high resolution. Downscale to 768 px on the longest edge before sending. Add a PIL resize step in `core/amenity_system.py`. |
+| **Reduce images per upload** | Linear speedup | Use 2–3 representative images instead of 8. The model sees the same rooms repeated with diminishing returns beyond 3 images. |
+| **Enable Flash Attention in Ollama** | 10–30% faster (VRAM-limited) | Set `OLLAMA_FLASH_ATTENTION=1` as an environment variable before `ollama serve`. Reduces KV-cache VRAM, allowing more layers on GPU. |
+| **Use Google Colab (free GPU)** | Full GPU speed (~10 s/image) | Run a Colab notebook that loads Qwen2.5-VL-7B on a T4 GPU (15 GB VRAM) and exposes a local Ollama-compatible endpoint via **ngrok**. The API container points `OLLAMA_BASE_URL` at the ngrok URL. Free tier allows ~4–5 hr/session. |
+| **Hugging Face Inference API** | Fast (hosted GPU) | HuggingFace offers free inference for some vision models. API shape differs from Ollama — requires a new `HFClient`. |
 
-OpenRouter pricing changes frequently. Check
-https://openrouter.ai/models for the current per-1M-token rates before
-running a long evaluation.
+### Does LM Studio work?
+
+**Yes, LM Studio works** and is worth trying. It is a desktop app (Windows/Mac/Linux) that:
+
+- Downloads and runs LLMs locally with a point-and-click GUI — easier than Ollama for exploring models.
+- Exposes an **OpenAI-compatible API** (`POST /v1/chat/completions`) on `localhost:1234`.
+- Supports the same quantized `qwen2.5-vl` models.
+- Sometimes achieves slightly better memory efficiency than Ollama because of different backend settings.
+
+**However, the VRAM constraint is the same.** LM Studio on a GTX 1660 Ti still cannot fit `qwen2.5vl:7b` fully in 6 GB. You'd see the same CPU fallback. The advantage over Ollama is the GUI makes it easier to try different quantization levels (Q4_0 vs Q5_K_M vs Q8_0) to find the one that *just* fits.
+
+To use LM Studio with this project: start the local server in LM Studio, set `OLLAMA_BASE_URL=http://localhost:1234` and the `OllamaClient` will work because LM Studio also accepts the `/api/chat` endpoint shape (with a minor caveat: field names are slightly different). A dedicated `LMStudioClient` that uses the OpenAI-compatible endpoint would be cleaner.
+
+---
+
+### Low-cost / budget options
+
+| Option | Cost | Notes |
+|---|---|---|
+| **Upgrade GPU** | €400–700 (used RTX 3090, 24 GB) | Fits `qwen2.5vl:7b` 3× over. Instant full GPU inference. One-time cost, usable for all future projects. Best long-term investment. |
+| **RunPod / vast.ai GPU rental** | ~€0.15–0.40 /hr | Rent an A10 or RTX 3090 by the hour. Spin up when testing, shut down when done. Good for one-off evaluation sessions. |
+| **Together AI** | ~€0.20 / 1M tokens | Hosted inference API with fast GPUs. Supports several open vision models. Add a `TogetherClient` (OpenAI-compatible API shape). |
+| **Replicate** | Pay-per-second GPU time | `yorickvp/llava-13b` and similar models are available. Billed only when inference runs. |
+| **Modal.com** | ~€0.0006 / GPU-second (A10G) | Serverless Python — deploy a function that loads the model on an A10G and returns inference results. Very cheap for low-volume usage; no always-on cost. |
+| **Google Vertex AI / Gemini Pro** | Pay-per-token | If free-tier Gemini quota isn't enough, upgrading to a paid project unlocks higher limits with no code change. |
+
+### Recommended immediate actions (free, high impact)
+
+1. **Today**: Use `gemini-2.0-flash` for all testing. It's free, fast, and already works. Save Ollama testing for GPU-availability work.
+2. **Short-term**: Add a PIL resize step capping images at 768 px before inference — 3-line change, free speedup for all models.
+3. **Medium-term**: Process images in parallel (`concurrent.futures.ThreadPoolExecutor`) in `core/amenity_system.py`. Since each image is an independent VLM call, parallelism gives a near-linear speedup (e.g., 4 images → ~same time as 1).
+4. **If budget allows**: Rent a RunPod A10 for an evening to baseline true GPU speeds, then decide whether a GPU upgrade is worthwhile.
 
 ---
 

@@ -267,8 +267,8 @@ TEST_DATABASE_URL=postgresql://amenity_user:amenity_pass@localhost:5432/amenity_
 
 ## Testing The OpenRouter Flow
 
-Use this checklist after a fresh `git pull` or after Phase 8 implementation
-work. It covers static checks, container health, and the user-facing flow.
+Use this checklist after a fresh `git pull` or OpenRouter-related changes. It
+covers static checks, container health, and the user-facing flow.
 
 1. Static checks (host machine):
 
@@ -366,7 +366,7 @@ Completed:
 - Per-image detection flow with incremental progress.
 - Per-room amenity review UI.
 - Structured logging, Prometheus metrics, and Grafana dashboards.
-- Phase 8: OpenRouter migration and project cleanup (in progress).
+- OpenRouter migration and project cleanup.
 
 Next likely work:
 
