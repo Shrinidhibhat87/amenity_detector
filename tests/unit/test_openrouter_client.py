@@ -55,10 +55,24 @@ def test_json_mode_true_sends_response_format(monkeypatch):
             choices=[MagicMock(message=MagicMock(content=""))]
         )
         client = OpenRouterVLMClient(model="openai/gpt-4o-mini", json_mode=True)
-        client.generate(_img(), "p")
+        client.generate(_img(), "Return a JSON object.")
 
     kwargs = completions.create.call_args.kwargs
     assert kwargs.get("response_format") == {"type": "json_object"}
+
+
+def test_json_mode_true_omits_response_format_for_non_json_prompt(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    with patch("models.openrouter_client.OpenAI") as openai_cls:
+        completions = openai_cls.return_value.chat.completions
+        completions.create.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(content=""))]
+        )
+        client = OpenRouterVLMClient(model="openai/gpt-4o-mini", json_mode=True)
+        client.generate(_img(), "Write a warm property description.")
+
+    kwargs = completions.create.call_args.kwargs
+    assert "response_format" not in kwargs
 
 
 def test_json_mode_false_omits_response_format(monkeypatch):
@@ -82,3 +96,17 @@ def test_sdk_error_becomes_runtime_error(monkeypatch):
         client = OpenRouterVLMClient(model="openai/gpt-4o-mini")
         with pytest.raises(RuntimeError):
             client.generate(_img(), "p")
+
+
+def test_generate_sends_image_as_data_url(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    with patch("models.openrouter_client.OpenAI") as openai_cls:
+        completions = openai_cls.return_value.chat.completions
+        completions.create.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(content=""))]
+        )
+        OpenRouterVLMClient(model="openai/gpt-4o-mini").generate(_img(), "p")
+    content = completions.create.call_args.kwargs["messages"][0]["content"]
+    assert content[0]["type"] == "image_url"
+    assert content[0]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    assert content[1] == {"type": "text", "text": "p"}

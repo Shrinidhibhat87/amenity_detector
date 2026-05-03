@@ -15,6 +15,7 @@ import base64
 import io
 import logging
 import os
+from typing import Any
 
 from openai import OpenAI
 from PIL.Image import Image
@@ -43,7 +44,8 @@ class OpenRouterVLMClient(VLMClient):
             )
         self._model = model
         self._json_mode = json_mode
-        self._client = OpenAI(api_key=resolved, base_url=_BASE_URL)
+        timeout = float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "60"))
+        self._client = OpenAI(api_key=resolved, base_url=_BASE_URL, timeout=timeout)
 
     @property
     def model_name(self) -> str:
@@ -57,7 +59,7 @@ class OpenRouterVLMClient(VLMClient):
 
     def generate(self, image: Image, prompt: str) -> VLMResponse:
         data_url = self._image_to_data_url(image)
-        kwargs: dict[str, object] = {
+        kwargs: dict[str, Any] = {
             "model": self._model,
             "messages": [
                 {
@@ -69,7 +71,11 @@ class OpenRouterVLMClient(VLMClient):
                 }
             ],
         }
-        if self._json_mode:
+        # OpenAI/OpenRouter JSON mode is only valid when the prompt explicitly asks
+        # for JSON. The same client instance is reused for free-text description
+        # generation, so gate response_format on both the model capability and the
+        # prompt intent.
+        if self._json_mode and "json" in prompt.lower():
             kwargs["response_format"] = {"type": "json_object"}
 
         try:

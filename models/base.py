@@ -26,7 +26,7 @@ class VLMResponse:
     Attributes:
         raw_text:   The raw text output from the model (not yet parsed).
         model_name: The model identifier that produced this response
-                    (e.g., "qwen2.5vl:7b" or "gemini-2.0-flash").
+                    (e.g., "openai/gpt-4o-mini").
     """
 
     raw_text: str
@@ -37,9 +37,8 @@ class VLMClient(ABC):
     """
     Abstract base class that every VLM backend must implement.
 
-    Concrete implementations live in:
-      - models/ollama_client.py  (Qwen2.5-VL-7B, LLaMA 3.2 Vision via Ollama)
-      - models/gemini_client.py  (Gemini 2.0 Flash via Google API)
+    Concrete implementations live in modules such as
+    `models/openrouter_client.py`.
     """
 
     @abstractmethod
@@ -64,7 +63,7 @@ class VLMClient(ABC):
     @abstractmethod
     def model_name(self) -> str:
         """
-        The canonical model identifier string (e.g., "qwen2.5vl:7b").
+        The canonical model identifier string (e.g., "openai/gpt-4o-mini").
 
         Used by ModelRegistry and stored in the database alongside results
         so you always know which model produced a given detection.
