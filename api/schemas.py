@@ -77,6 +77,7 @@ class PropertySummaryResponse(BaseModel):
     extra_info: str | None
     created_at: datetime
     image_count: int = 0  # Populated from len(property.images) in the router
+    first_image_id: str | None = None  # Used by the Gradio browse card thumbnails
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -165,6 +166,7 @@ class DescribeRequest(BaseModel):
     has_kitchen: bool | None = None
     has_balcony: bool | None = None
     has_living_room: bool | None = None
+    hints: dict[str, bool] | None = None
 
 
 class DescribeResponse(BaseModel):

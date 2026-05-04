@@ -12,6 +12,8 @@ Environment variables:
   GRADIO_PORT   — Port to bind on (default: 7860)
 """
 
+import html
+import json
 import logging
 import os
 from typing import Any, cast
@@ -24,7 +26,12 @@ import gradio as gr
 import requests
 
 from core.logging_config import setup_logging
+from ui.components.cards import cards_grid_html
+from ui.components.orbs import bg_orbs_html
+from ui.components.pills import hints_grid_html
+from ui.components.stepper import step_html
 from ui.helpers import WARNING_PREFIX, reconcile_amenities
+from ui.hints import AMENITY_GROUPS, HINT_KEYS, hints_payload
 from ui.review_state import (
     add_item,
     amenities_for_describe,
@@ -37,6 +44,8 @@ from ui.review_state import (
     save_edit,
     start_edit,
 )
+from ui.theme import CSS, HEAD
+from ui.view_router import BROWSE, HOME, UPLOAD, go_to
 
 # Configure structured logging so UI exceptions are captured in `docker compose
 # logs ui` with a level, module and full traceback — the UI process is a
@@ -159,17 +168,25 @@ def _sidebar_payload(
     kitchen_hint: str | None,
     balcony_hint: str | None,
     living_room_hint: str | None,
+    expanded_hints: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
     """
     Build the sidebar hint payload used by reconciliation and /describe.
     """
     parsed_rooms = int(num_rooms or 0)
+    hints = expanded_hints or {}
     return {
         "num_rooms": parsed_rooms if parsed_rooms > 0 else None,
-        "has_kitchen": _hint_to_bool(kitchen_hint),
-        "has_balcony": _hint_to_bool(balcony_hint),
-        "has_living_room": _hint_to_bool(living_room_hint),
+        "has_kitchen": hints.get("kitchen", _hint_to_bool(kitchen_hint)),
+        "has_balcony": hints.get("balcony", _hint_to_bool(balcony_hint)),
+        "has_living_room": hints.get("living_room", _hint_to_bool(living_room_hint)),
+        "hints": hints,
     }
+
+
+def _expanded_hints_from_sequence(values: tuple[str | None, ...]) -> dict[str, bool]:
+    """Build the sparse expanded hints dict from ordered hidden textbox values."""
+    return hints_payload(dict(zip(HINT_KEYS, values, strict=False)))
 
 
 def _strip_warning_prefix(value: Any) -> str:
@@ -444,57 +461,8 @@ _HERO_HTML = """
 
 
 def _step_html(active: int) -> str:
-    """
-    Build the 4-step progress indicator HTML for the Upload tab.
-
-    Args:
-        active: Index of the currently active step (0-based).
-                0=Upload, 1=Detect, 2=Review, 3=Generate.
-
-    Returns:
-        HTML string to inject into a gr.HTML component.
-    """
-    # All colours come from the --ad-* CSS variables defined in _CSS, so the
-    # indicator switches automatically with the rest of the theme. Hardcoded
-    # hex would silently fail in dark mode (dark text on dark background).
-    labels = ["1. Upload", "2. Detect", "3. Review & Edit", "4. Generate Description"]
-    parts: list[str] = [
-        "<div style='display:flex;align-items:center;gap:0;margin:0 0 20px;flex-wrap:wrap;gap:4px;'>"
-    ]
-    for i, label in enumerate(labels):
-        if i < active:
-            # Completed — solid amber dot with checkmark
-            dot_style = "background:var(--ad-amber);color:var(--button-primary-text-color,#fff);"
-            text_style = "color:var(--ad-amber);"
-            symbol = "✓"
-        elif i == active:
-            # Current — amber outline on a faint amber wash
-            dot_style = (
-                "background:var(--ad-yellow);color:var(--ad-amber);"
-                "border:2px solid var(--ad-amber);"
-            )
-            text_style = "color:var(--ad-text);font-weight:700;"
-            symbol = str(i + 1)
-        else:
-            # Future — muted, sits quietly in the background
-            dot_style = "background:var(--ad-bg2);color:var(--ad-text-light);"
-            text_style = "color:var(--ad-text-light);"
-            symbol = str(i + 1)
-
-        parts.append(
-            f"<div style='display:flex;align-items:center;gap:6px;'>"
-            f"<div style='width:26px;height:26px;border-radius:50%;display:flex;align-items:center;"
-            f"justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;{dot_style}'>{symbol}</div>"
-            f"<span style='font-size:12px;font-weight:600;{text_style}'>{label}</span>"
-            f"</div>"
-        )
-        if i < len(labels) - 1:
-            line_color = "var(--ad-amber)" if i < active else "var(--ad-border)"
-            parts.append(
-                f"<div style='flex:1;min-width:20px;max-width:40px;height:2px;background:{line_color};'></div>"
-            )
-    parts.append("</div>")
-    return "".join(parts)
+    """Build the 4-step progress indicator HTML for the Upload page."""
+    return step_html(active)
 
 
 # ── Upload tab handlers ────────────────────────────────────────────────────────
@@ -524,6 +492,7 @@ def upload_and_detect(
     kitchen_hint: str | None,
     balcony_hint: str | None,
     living_room_hint: str | None,
+    expanded_hints: dict[str, bool] | None = None,
     progress: gr.Progress = gr.Progress(),
 ):
     """
@@ -544,7 +513,7 @@ def upload_and_detect(
 
     if not files:
         yield (
-            _step_html(0),
+            _step_html(1),
             "Please upload at least one image.",
             empty_review,
             "",
@@ -552,13 +521,15 @@ def upload_and_detect(
         )
         return
     if not property_name.strip():
-        yield _step_html(0), "Please enter a property name.", empty_review, "", empty_upload_state
+        yield _step_html(1), "Please enter a property name.", empty_review, "", empty_upload_state
         return
     if not model_name:
-        yield _step_html(0), "Please select a model.", empty_review, "", empty_upload_state
+        yield _step_html(1), "Please select a model.", empty_review, "", empty_upload_state
         return
 
-    sidebar = _sidebar_payload(num_rooms, kitchen_hint, balcony_hint, living_room_hint)
+    sidebar = _sidebar_payload(
+        num_rooms, kitchen_hint, balcony_hint, living_room_hint, expanded_hints
+    )
     seen_images: list[dict[str, Any]] = []
     property_id = ""
     try:
@@ -596,7 +567,7 @@ def upload_and_detect(
                 f"{index}/{total} images processed. You can keep editing the hints "
                 "while detection continues."
             )
-            yield _step_html(1), status, review_state, "", upload_state
+            yield _step_html(2), status, review_state, "", upload_state
 
         progress(1.0, desc="Detection complete")
         review_state = _reconciled_review_state(seen_images, sidebar)
@@ -605,14 +576,14 @@ def upload_and_detect(
             f"Detected {total_items} amenities for '{property_name}'. "
             "Review per-room below, then click Confirm."
         )
-        yield _step_html(2), status, review_state, "", upload_state
+        yield _step_html(3), status, review_state, "", upload_state
 
     except requests.exceptions.Timeout:
         logger.warning(
             "Upload timed out after %ds for property '%s'", _TIMEOUT_SECONDS, property_name
         )
         yield (
-            _step_html(0),
+            _step_html(1),
             "Request timed out. Try a faster model or fewer images.",
             empty_review,
             "",
@@ -621,7 +592,7 @@ def upload_and_detect(
     except requests.exceptions.ConnectionError:
         logger.warning("Cannot reach API at %s during upload", _API_BASE_URL)
         yield (
-            _step_html(0),
+            _step_html(1),
             f"Cannot reach the API at {_API_BASE_URL}. Is the backend running?",
             empty_review,
             "",
@@ -638,13 +609,13 @@ def upload_and_detect(
         logger.warning(
             "Upload failed (HTTP %s): %s", getattr(exc.response, "status_code", "?"), detail or exc
         )
-        yield _step_html(0), f"Upload failed: {detail or exc}", empty_review, "", empty_upload_state
+        yield _step_html(1), f"Upload failed: {detail or exc}", empty_review, "", empty_upload_state
     except Exception as exc:
         # logger.exception includes the full traceback so that the real root
         # cause is visible in `docker compose logs ui` instead of just a
         # one-line "Unexpected error".
         logger.exception("Unexpected error in upload_and_detect for property '%s'", property_name)
-        yield _step_html(0), f"Unexpected error: {exc}", empty_review, "", empty_upload_state
+        yield _step_html(1), f"Unexpected error: {exc}", empty_review, "", empty_upload_state
 
 
 def confirm_and_describe(
@@ -654,6 +625,7 @@ def confirm_and_describe(
     kitchen_hint: str | None,
     balcony_hint: str | None,
     living_room_hint: str | None,
+    expanded_hints: dict[str, bool] | None = None,
 ) -> tuple[str, str, str]:
     """
     Handle 'Confirm & Generate Description' button click.
@@ -672,10 +644,12 @@ def confirm_and_describe(
     model_name = upload_state.get("model_name", "openai/gpt-4o-mini")
 
     if not property_id:
-        return _step_html(2), "Upload images first before generating a description.", ""
+        return _step_html(3), "Upload images first before generating a description.", ""
 
     amenities = amenities_for_describe(review_state or [])
-    sidebar = _sidebar_payload(num_rooms, kitchen_hint, balcony_hint, living_room_hint)
+    sidebar = _sidebar_payload(
+        num_rooms, kitchen_hint, balcony_hint, living_room_hint, expanded_hints
+    )
 
     try:
         response = requests.post(
@@ -686,10 +660,10 @@ def confirm_and_describe(
         response.raise_for_status()
     except requests.exceptions.Timeout:
         logger.warning("Describe call timed out for property %s", property_id)
-        return _step_html(2), "Description generation timed out. Try again.", ""
+        return _step_html(3), "Description generation timed out. Try again.", ""
     except requests.exceptions.ConnectionError:
         logger.warning("Cannot reach API at %s during describe", _API_BASE_URL)
-        return _step_html(2), f"Cannot reach API at {_API_BASE_URL}.", ""
+        return _step_html(3), f"Cannot reach API at {_API_BASE_URL}.", ""
     except requests.exceptions.HTTPError as exc:
         detail = ""
         try:
@@ -702,10 +676,10 @@ def confirm_and_describe(
             getattr(exc.response, "status_code", "?"),
             detail or exc,
         )
-        return _step_html(2), f"Description failed: {detail or exc}", ""
+        return _step_html(3), f"Description failed: {detail or exc}", ""
     except Exception as exc:
         logger.exception("Unexpected error in confirm_and_describe for property %s", property_id)
-        return _step_html(2), f"Unexpected error: {exc}", ""
+        return _step_html(3), f"Unexpected error: {exc}", ""
 
     description: str = response.json().get("description", "")
     return _step_html(3), "Description generated. You can edit it below before saving.", description
@@ -717,6 +691,7 @@ def reconcile_state_from_hints(
     balcony_hint: str | None,
     living_room_hint: str | None,
     review_state: list[dict[str, Any]] | None,
+    expanded_hints: dict[str, bool] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Re-run mismatch markers across the review state when sidebar hints change.
@@ -724,7 +699,9 @@ def reconcile_state_from_hints(
     Flattens non-editing items to the row shape reconcile expects, runs the
     warning-prefix logic, and writes the updated names back into state.
     """
-    sidebar = _sidebar_payload(num_rooms, kitchen_hint, balcony_hint, living_room_hint)
+    sidebar = _sidebar_payload(
+        num_rooms, kitchen_hint, balcony_hint, living_room_hint, expanded_hints
+    )
     state = review_state or []
     reconciled_rows = reconcile_amenities(sidebar, flatten_for_reconcile(state))
     return apply_reconciled_names(state, reconciled_rows)
@@ -811,6 +788,37 @@ def list_all_properties() -> list[list[Any]]:
     ]
 
 
+def _fetch_property_summaries(amenity_query: str | None = None) -> list[dict[str, Any]]:
+    """Fetch browse summaries for card rendering."""
+    try:
+        if amenity_query and amenity_query.strip():
+            response = requests.get(
+                f"{_API_BASE_URL}/api/v1/properties/search",
+                params={"amenities": amenity_query.strip()},
+                timeout=30,
+            )
+        else:
+            response = requests.get(
+                f"{_API_BASE_URL}/api/v1/properties/",
+                params={"limit": 50},
+                timeout=30,
+            )
+        response.raise_for_status()
+        return cast(list[dict[str, Any]], response.json())
+    except Exception:
+        return []
+
+
+def list_property_cards() -> str:
+    """Fetch all properties and render browse cards."""
+    return cards_grid_html(_fetch_property_summaries(), _API_BASE_URL)
+
+
+def search_property_cards(amenity_query: str) -> str:
+    """Fetch matching properties and render browse cards."""
+    return cards_grid_html(_fetch_property_summaries(amenity_query), _API_BASE_URL)
+
+
 def get_property_detail(property_id: str) -> str:
     """
     Fetch and render full details for a single property as Markdown.
@@ -886,31 +894,139 @@ def _render_review_panel(state: list[dict[str, Any]], state_component: gr.State)
     ``item_id`` is bound as a default argument so each lambda closes over the
     right row (the usual loop-variable-capture trap).
     """
+    # Keep the panel dynamic, but do not create dynamic Gradio event listeners
+    # here. In Gradio 6.12 those listeners can become inert after rerendering.
+    # Buttons below are plain HTML and delegate to one static hidden Gradio
+    # button declared in build_app().
+    gr.HTML(_review_panel_html(state or []))
+
+
+def _review_panel_html(state: list[dict[str, Any]]) -> str:
+    """Render review state as HTML controlled by one static JS event delegate."""
     if not state:
-        gr.Markdown(
-            "_No amenities yet. Upload images on the left to start detection._",
-            elem_classes="ad-review-empty",
-        )
-        return
+        return '<p class="ad-review-empty">No amenities yet. Upload images to start detection.</p>'
 
+    cards: list[str] = []
     for block in state:
-        room = block["room"]
-        items = block["items"]
-        with gr.Group():
-            gr.Markdown(f"#### 🏠 {_humanise_room(room)}")
-            for item in items:
-                _render_item_row(item, state_component)
+        room = str(block["room"])
+        room_label = _humanise_room(room)
+        rows = "".join(_review_item_html(item) for item in block.get("items", []))
+        add_payload = html.escape(json.dumps({"action": "add", "room": room}))
+        cards.append(
+            '<section class="room-card">'
+            f"<h4>🏠 {html.escape(room_label)}</h4>"
+            f'<div class="amenity-list">{rows}</div>'
+            f'<button type="button" class="review-add-btn" data-review-payload="{add_payload}">'
+            "+ Add amenity"
+            "</button>"
+            "</section>"
+        )
+    return f'<div class="review-room-grid">{"".join(cards)}</div>'
 
-            add_btn = gr.Button(
-                "+ Add amenity",
-                variant="secondary",
-                size="sm",
-            )
-            add_btn.click(
-                fn=lambda current, r=room: add_item(current or [], r),
-                inputs=[state_component],
-                outputs=[state_component],
-            )
+
+def _review_item_html(item: dict[str, Any]) -> str:
+    """Render one amenity row as inert HTML plus data attributes."""
+    item_id = str(item["id"])
+    status = str(item.get("status", "pending"))
+    name = str(item.get("name", ""))
+    present = bool(item.get("present", True))
+    confidence = item.get("confidence")
+
+    if status == "editing":
+        editable_name = html.escape(name.removeprefix(WARNING_PREFIX), quote=True)
+        checked = " checked" if present else ""
+        return (
+            '<div class="amenity-row amenity-edit-row">'
+            f'<input class="review-edit-input" id="review-name-{html.escape(item_id)}" '
+            f'value="{editable_name}" placeholder="Amenity name">'
+            '<label class="review-present-check">'
+            f'<input type="checkbox" id="review-present-{html.escape(item_id)}"{checked}> Present'
+            "</label>"
+            f"{_review_action_button('save', item_id, '✓ Save', 'primary')}"
+            f"{_review_action_button('cancel', item_id, '✗ Cancel')}"
+            "</div>"
+        )
+
+    if status == "confirmed":
+        display_name = html.escape(name.removeprefix(WARNING_PREFIX) or "(empty)")
+        icon = "✓" if present else "✗"
+        tone = "present" if present else "absent"
+        return (
+            '<div class="amenity-row amenity-confirmed-row">'
+            '<div class="amenity-copy">'
+            f'<span class="amenity-chip amenity-chip-{tone}">{icon} {display_name} '
+            f"<em>({tone})</em></span>"
+            "</div>"
+            f"{_review_action_button('edit', item_id, 'Undo')}"
+            "</div>"
+        )
+
+    is_warning = name.startswith(WARNING_PREFIX)
+    warning_class = " amenity-warning" if is_warning else ""
+    badge = "⚠ " if is_warning else ""
+    display_name = html.escape(name.removeprefix(WARNING_PREFIX))
+    conf_str = f"{confidence:.2f}" if isinstance(confidence, (int, float)) else "—"
+    present_str = "Present" if present else "Not present"
+    return (
+        '<div class="amenity-row amenity-pending-row">'
+        '<div class="amenity-copy">'
+        f'<div class="amenity-line{warning_class}">'
+        f'<span class="amenity-name">{badge}{display_name}</span>'
+        f'<span class="amenity-meta">{present_str} · confidence {html.escape(conf_str)}</span>'
+        "</div>"
+        "</div>"
+        f"{_review_action_button('confirm', item_id, '✓', 'primary')}"
+        f"{_review_action_button('edit', item_id, '✎')}"
+        f"{_review_action_button('reject', item_id, '✗')}"
+        "</div>"
+    )
+
+
+def _review_action_button(action: str, item_id: str, label: str, variant: str = "") -> str:
+    payload = html.escape(json.dumps({"action": action, "id": item_id}))
+    variant_class = " primary" if variant == "primary" else ""
+    return (
+        f'<button type="button" class="amenity-action review-action-btn{variant_class}" '
+        f'data-review-payload="{payload}">{html.escape(label)}</button>'
+    )
+
+
+def apply_review_action(
+    payload_json: str, state: list[dict[str, Any]] | None
+) -> list[dict[str, Any]]:
+    """Apply one HTML review-button action to the Gradio review state."""
+    state = state or []
+    try:
+        payload = json.loads(payload_json or "{}")
+    except json.JSONDecodeError:
+        logger.warning("Ignoring malformed review action payload: %r", payload_json)
+        return state
+
+    action = str(payload.get("action", ""))
+    item_id = str(payload.get("id", ""))
+
+    if action == "add":
+        return add_item(state, str(payload.get("room", "unknown") or "unknown"))
+    if not item_id:
+        return state
+    if action == "confirm":
+        return confirm_item(state, item_id)
+    if action == "edit":
+        return start_edit(state, item_id)
+    if action == "reject":
+        return reject_item(state, item_id)
+    if action == "save":
+        return save_edit(
+            state,
+            item_id,
+            str(payload.get("name", "")),
+            bool(payload.get("present", True)),
+        )
+    if action == "cancel":
+        return cancel_edit(state, item_id)
+
+    logger.warning("Ignoring unknown review action: %r", action)
+    return state
 
 
 def _render_item_row(item: dict[str, Any], state_component: gr.State) -> None:
@@ -942,18 +1058,25 @@ def _render_confirmed_chip(
     display_name = name.removeprefix(WARNING_PREFIX) or "(empty)"
     icon = "✓" if present else "✗"
     tone = "present" if present else "absent"
-    with gr.Row():
+    with gr.Row(elem_classes=["amenity-row", "amenity-confirmed-row"], key=f"{item_id}-confirmed"):
         gr.Markdown(
-            f"<span style='background:var(--ad-amber-bg);color:var(--ad-amber);"
-            f"padding:4px 10px;border-radius:100px;font-size:13px;font-weight:600;'>"
-            f"{icon} {display_name} <em style='font-weight:400;opacity:0.7'>({tone})</em>"
-            f"</span>"
+            f'<span class="amenity-chip amenity-chip-{tone}">'
+            f"{icon} {display_name} <em>({tone})</em>"
+            "</span>",
+            elem_classes=["amenity-copy"],
         )
-        undo_btn = gr.Button("Undo", size="sm", scale=0)
+        undo_btn = gr.Button(
+            "Undo",
+            size="sm",
+            scale=0,
+            elem_classes=["amenity-action"],
+            key=f"{item_id}-undo",
+        )
         undo_btn.click(
             fn=lambda current, i=item_id: start_edit(current or [], i),
             inputs=[state_component],
             outputs=[state_component],
+            queue=False,
         )
 
 
@@ -968,26 +1091,49 @@ def _render_editing_row(
     # about to change the name anyway, and the prefix should never end up
     # committed to the amenity's actual name.
     editable_name = name.removeprefix(WARNING_PREFIX)
-    with gr.Row():
+    with gr.Row(elem_classes=["amenity-row", "amenity-edit-row"], key=f"{item_id}-editing"):
         name_tb = gr.Textbox(
             value=editable_name,
             placeholder="Amenity name (e.g. dishwasher)",
             show_label=False,
             scale=3,
+            elem_classes=["amenity-edit-name"],
+            key=f"{item_id}-name",
         )
-        present_cb = gr.Checkbox(value=present, label="Present", scale=1)
-        save_btn = gr.Button("✓ Save", variant="primary", size="sm", scale=0)
-        cancel_btn = gr.Button("✗ Cancel", size="sm", scale=0)
+        present_cb = gr.Checkbox(
+            value=present,
+            label="Present",
+            scale=1,
+            elem_classes=["amenity-present-check"],
+            key=f"{item_id}-present",
+        )
+        save_btn = gr.Button(
+            "✓ Save",
+            variant="primary",
+            size="sm",
+            scale=0,
+            elem_classes=["amenity-action"],
+            key=f"{item_id}-save",
+        )
+        cancel_btn = gr.Button(
+            "✗ Cancel",
+            size="sm",
+            scale=0,
+            elem_classes=["amenity-action"],
+            key=f"{item_id}-cancel",
+        )
 
         save_btn.click(
             fn=lambda current, n, p, i=item_id: save_edit(current or [], i, n, bool(p)),
             inputs=[state_component, name_tb, present_cb],
             outputs=[state_component],
+            queue=False,
         )
         cancel_btn.click(
             fn=lambda current, i=item_id: cancel_edit(current or [], i),
             inputs=[state_component],
             outputs=[state_component],
+            queue=False,
         )
 
 
@@ -1001,35 +1147,51 @@ def _render_pending_row(
     """Default row: show name + confidence + ✓ / ✎ / ✗ buttons."""
     is_warning = name.startswith(WARNING_PREFIX)
     display_name = name.removeprefix(WARNING_PREFIX)
+    warning_class = " amenity-warning" if is_warning else ""
     badge = "⚠ " if is_warning else ""
-    colour = "var(--ad-amber)" if is_warning else "var(--ad-text)"
     conf_str = f"{confidence:.2f}" if isinstance(confidence, (int, float)) else "—"
     present_str = "Present" if present else "Not present"
 
-    with gr.Row():
+    with gr.Row(elem_classes=["amenity-row", "amenity-pending-row"], key=f"{item_id}-pending"):
         gr.Markdown(
-            f"<span style='color:{colour};font-weight:600'>{badge}{display_name}</span> "
-            f"<span style='color:var(--ad-text-light);font-size:12px;margin-left:8px'>"
-            f"{present_str} · confidence {conf_str}</span>"
+            f'<div class="amenity-line{warning_class}">'
+            f'<span class="amenity-name">{badge}{display_name}</span>'
+            f'<span class="amenity-meta">{present_str} · confidence {conf_str}</span>'
+            "</div>",
+            elem_classes=["amenity-copy"],
         )
-        confirm_btn = gr.Button("✓", size="sm", scale=0, variant="primary")
-        edit_btn = gr.Button("✎", size="sm", scale=0)
-        reject_btn = gr.Button("✗", size="sm", scale=0)
+        confirm_btn = gr.Button(
+            "✓",
+            size="sm",
+            scale=0,
+            variant="primary",
+            elem_classes=["amenity-action"],
+            key=f"{item_id}-confirm",
+        )
+        edit_btn = gr.Button(
+            "✎", size="sm", scale=0, elem_classes=["amenity-action"], key=f"{item_id}-edit"
+        )
+        reject_btn = gr.Button(
+            "✗", size="sm", scale=0, elem_classes=["amenity-action"], key=f"{item_id}-reject"
+        )
 
         confirm_btn.click(
             fn=lambda current, i=item_id: confirm_item(current or [], i),
             inputs=[state_component],
             outputs=[state_component],
+            queue=False,
         )
         edit_btn.click(
             fn=lambda current, i=item_id: start_edit(current or [], i),
             inputs=[state_component],
             outputs=[state_component],
+            queue=False,
         )
         reject_btn.click(
             fn=lambda current, i=item_id: reject_item(current or [], i),
             inputs=[state_component],
             outputs=[state_component],
+            queue=False,
         )
 
 
@@ -1078,204 +1240,344 @@ def _build_theme() -> Any:
 
 
 def build_app() -> gr.Blocks:
-    """
-    Construct and return the full Gradio Blocks application.
-
-    Structure:
-      1. gr.HTML — hero landing page (animations, CTA buttons)
-      2. gr.Tabs
-         ├── Tab "Upload & Detect"
-         └── Tab "Browse Properties"
-
-    Returns:
-        Configured gr.Blocks instance ready to launch.
-    """
+    """Construct and return the three-page Gradio Blocks application."""
     available_models = _get_available_models()
     default_model = available_models[0] if available_models else "openai/gpt-4o-mini"
 
-    # In Gradio 6 the `theme=`, `css=` and `js=` parameters belong on launch(),
-    # not on gr.Blocks() — passing them here raises a UserWarning. The hero
-    # typewriter script is embedded directly inside the gr.HTML block below
-    # (see _HERO_HTML) so it runs as soon as the hero markup is inserted into
-    # the DOM, regardless of how Gradio handles `launch(js=...)`.
     with gr.Blocks(title="Amenity Detector") as demo:
-        # ── Hero landing page ──────────────────────────────────────────────────
-        gr.HTML(_HERO_HTML)
+        page_state = gr.State(HOME)
+        upload_state = gr.State({})
+        review_state = gr.State([])
+        gr.HTML(bg_orbs_html())
 
-        # ── Tabs ──────────────────────────────────────────────────────────────
-        with gr.Tabs():
-            # ── Upload & Detect tab ────────────────────────────────────────────
-            with gr.Tab("↑ Upload & Detect"):
-                # gr.State stores {property_id, model_name} between steps.
-                # review_state holds the per-room amenity data consumed by the
-                # @gr.render panel below (see ui/review_state.py for shape).
-                upload_state = gr.State({})
-                review_state = gr.State([])
+        with gr.Group(visible=True) as home_group:
+            with gr.Column(elem_classes=["app-shell"]):
+                gr.HTML(
+                    """
+                    <div class="top-bar">
+                      <button class="login-btn" disabled>Sign in</button>
+                      <button type="button" class="theme-toggle" aria-label="Toggle theme"></button>
+                    </div>
+                    <section class="ad-hero">
+                      <div>
+                        <div class="ad-badge">AI-powered property analysis</div>
+                        <h1 class="ad-title">Amenity Detector</h1>
+                        <p class="ad-sub"><span id="ad-typewriter"></span><span class="cursor"></span></p>
+                        <div class="ad-chips">
+                          <span class="ad-chip">Room classification</span>
+                          <span class="ad-chip">Editable detections</span>
+                          <span class="ad-chip">Browse saved properties</span>
+                        </div>
+                      </div>
+                    </section>
+                    """
+                )
+                with gr.Row(elem_classes=["cta-row"]):
+                    home_to_upload_btn = gr.Button("Upload & Detect", variant="primary", scale=1)
+                    home_to_browse_btn = gr.Button(
+                        "Browse Properties", variant="secondary", scale=1
+                    )
 
+        with gr.Group(visible=False) as upload_group:
+            with gr.Column(elem_classes=["app-shell"]):
+                with gr.Row(elem_classes=["top-bar"]):
+                    upload_back_btn = gr.Button(
+                        "Back", variant="secondary", elem_classes=["back-chip"]
+                    )
+                    gr.HTML(
+                        '<button type="button" class="theme-toggle" aria-label="Toggle theme"></button>'
+                    )
+                gr.HTML(
+                    '<div class="section-title"><h2>Upload & Detect</h2><span class="dim">Step-by-step property analysis</span></div>'
+                )
                 step_indicator = gr.HTML(_step_html(0))
 
-                with gr.Row():
-                    # Left column: form
-                    with gr.Column(scale=1, min_width=280):
-                        image_files = gr.Files(
-                            label="Property Images",
-                            file_types=["image"],
-                            file_count="multiple",
-                        )
-                        property_name_input = gr.Textbox(
-                            label="Property Name",
-                            placeholder="e.g. Frankfurt Apartment · 2BR",
-                        )
-                        model_dropdown = gr.Dropdown(
-                            choices=available_models,
-                            value=default_model,
-                            label="AI Model",
-                            info="Models are served through OpenRouter. Set OPENROUTER_API_KEY in your environment.",
-                        )
-                        extra_info_input = gr.Textbox(
-                            label="Additional Notes (optional)",
-                            placeholder="e.g. 2-bed flat in Frankfurt, central heating",
-                            lines=2,
-                        )
-                        gr.Markdown("### Property Hints")
-                        num_rooms_input = gr.Slider(
-                            minimum=0,
-                            maximum=6,
-                            step=1,
-                            value=0,
-                            label="Number of rooms",
-                            info="Leave at 0 if you do not want to specify.",
-                        )
-                        kitchen_hint_input = gr.Radio(
-                            choices=["Not specified", "Yes", "No"],
-                            value="Not specified",
-                            label="Kitchen",
-                        )
-                        balcony_hint_input = gr.Radio(
-                            choices=["Not specified", "Yes", "No"],
-                            value="Not specified",
-                            label="Balcony",
-                        )
-                        living_room_hint_input = gr.Radio(
-                            choices=["Not specified", "Yes", "No"],
-                            value="Not specified",
-                            label="Living room",
-                        )
-                        upload_btn = gr.Button("↑ Upload & Detect Amenities", variant="primary")
+                # ── Step 1: Config ──────────────────────────────────────────
+                with gr.Group(
+                    visible=True, elem_classes=["step-panel"], elem_id="step-config"
+                ) as step1_config:
+                    gr.Markdown("### Step 1 — Configuration")
+                    gr.Markdown("Tell us about the property and how you'd like it analysed.")
+                    property_name_input = gr.Textbox(
+                        label="Property Name", placeholder="e.g. Frankfurt Apartment, 2BR"
+                    )
+                    model_dropdown = gr.Dropdown(
+                        choices=available_models, value=default_model, label="AI Model"
+                    )
+                    extra_info_input = gr.Textbox(
+                        label="Additional Notes", lines=2, elem_id="additional-notes"
+                    )
+                    num_rooms_input = gr.Slider(
+                        minimum=0, maximum=6, step=1, value=0, label="Number of rooms"
+                    )
+                    hint_textboxes: list[Any] = []
+                    gr.HTML(hints_grid_html())
+                    for _group, hints in AMENITY_GROUPS:
+                        for key, _label in hints:
+                            tb = gr.Textbox(
+                                value="Not specified",
+                                elem_id=f"{key}-val",
+                                elem_classes=["hint-hidden"],
+                                show_label=False,
+                            )
+                            hint_textboxes.append(tb)
+                    with gr.Row(elem_classes=["step-actions", "right-only"]):
+                        step1_next_btn = gr.Button("Next: Upload images →", variant="primary")
 
-                    # Right column: results
-                    with gr.Column(scale=2):
-                        upload_status = gr.Textbox(label="Status", interactive=False)
+                # ── Step 2: Upload ──────────────────────────────────────────
+                with gr.Group(
+                    visible=False, elem_classes=["step-panel"], elem_id="step-upload"
+                ) as step2_upload:
+                    gr.Markdown("### Step 2 — Upload property images")
+                    gr.Markdown("Drag and drop one or more images, or click to browse.")
+                    image_files = gr.Files(
+                        label="Property Images", file_types=["image"], file_count="multiple"
+                    )
+                    with gr.Row(elem_classes=["step-actions"]):
+                        step2_back_btn = gr.Button("← Back", variant="secondary")
+                        step2_detect_btn = gr.Button("Start detection →", variant="primary")
 
-                        gr.Markdown("### Detected Amenities — Review per-room")
+                # ── Step 3: Detect (processing animation) ───────────────────
+                with gr.Group(
+                    visible=False, elem_classes=["step-panel"], elem_id="step-detect"
+                ) as step3_detect:
+                    gr.HTML(
+                        """
+                        <div class="processing-wrap">
+                          <div class="processing-icon">⚡</div>
+                          <div class="processing-title">Analysing your property</div>
+                          <div class="processing-sub">This may take a few seconds per image.</div>
+                          <div class="progress-shimmer-outer"><div class="progress-shimmer-inner"></div></div>
+                          <div class="proc-steps">
+                            <div class="proc-step done"><span class="proc-dot"></span>Uploading images</div>
+                            <div class="proc-step active"><span class="proc-dot"></span>Classifying rooms</div>
+                            <div class="proc-step"><span class="proc-dot"></span>Detecting amenities</div>
+                            <div class="proc-step"><span class="proc-dot"></span>Generating descriptions</div>
+                          </div>
+                        </div>
+                        """
+                    )
 
-                        # The @gr.render-decorated function below redraws the
-                        # review panel on every change to ``review_state``.
-                        # Buttons declared inside re-register their click
-                        # handlers each re-render — Gradio handles the diffing.
+                # ── Step 4: Review ──────────────────────────────────────────
+                with gr.Group(
+                    visible=False,
+                    elem_classes=["step-panel"],
+                    elem_id="step-review",
+                ) as step4_review:
+                    gr.Markdown("### Step 4 — Review & describe")
+                    upload_status = gr.Textbox(label="Status", interactive=False)
+                    gr.Markdown("#### Detected Amenities")
+                    with gr.Column(elem_id="review-cards-grid"):
+
                         @gr.render(inputs=[review_state])
                         def render_review_panel(state: list[dict[str, Any]]) -> None:
                             _render_review_panel(state, review_state)
 
-                        confirm_btn = gr.Button(
-                            "✔ Confirm & Generate Description", variant="primary"
-                        )
-
-                        description_output = gr.Textbox(
-                            label="Generated Description (editable)",
-                            lines=5,
-                            interactive=True,  # user can manually edit the text
-                            placeholder="Description will appear here after you click Confirm…",
-                        )
-
-                # Wire up events
-                upload_btn.click(
-                    fn=upload_and_detect,
-                    inputs=[
-                        image_files,
-                        property_name_input,
-                        model_dropdown,
-                        extra_info_input,
-                        num_rooms_input,
-                        kitchen_hint_input,
-                        balcony_hint_input,
-                        living_room_hint_input,
-                    ],
-                    outputs=[
-                        step_indicator,
-                        upload_status,
-                        review_state,
-                        description_output,
-                        upload_state,
-                    ],
-                )
-
-                confirm_btn.click(
-                    fn=confirm_and_describe,
-                    inputs=[
-                        review_state,
-                        upload_state,
-                        num_rooms_input,
-                        kitchen_hint_input,
-                        balcony_hint_input,
-                        living_room_hint_input,
-                    ],
-                    outputs=[step_indicator, upload_status, description_output],
-                )
-
-                hint_inputs: list[Any] = [
-                    num_rooms_input,
-                    kitchen_hint_input,
-                    balcony_hint_input,
-                    living_room_hint_input,
-                ]
-                for hint in hint_inputs:
-                    hint.change(
-                        fn=reconcile_state_from_hints,
-                        inputs=[*hint_inputs, review_state],
-                        outputs=[review_state],
+                    review_action_payload = gr.Textbox(
+                        value="",
+                        show_label=False,
+                        elem_id="review-action-payload",
+                        elem_classes=["hint-hidden"],
                     )
+                    review_action_apply = gr.Button(
+                        "Apply Review Action",
+                        elem_id="review-action-apply",
+                        elem_classes=["hint-hidden"],
+                    )
+                    confirm_btn = gr.Button("Confirm & Generate Description", variant="primary")
+                    description_output = gr.Textbox(
+                        label="Generated Description",
+                        lines=5,
+                        interactive=True,
+                        placeholder="Description will appear here after confirmation.",
+                    )
+                    with gr.Row(elem_classes=["step-actions"]):
+                        step4_back_btn = gr.Button("← Back to upload", variant="secondary")
 
-            # ── Browse Properties tab ──────────────────────────────────────────
-            with gr.Tab("🔍 Browse Properties"):
-                gr.Markdown(
-                    "Search stored properties by amenity name, or list all. "
-                    "Paste a property ID below to view full details."
+        with gr.Group(visible=False) as browse_group:
+            with gr.Column(elem_classes=["app-shell"]):
+                with gr.Row(elem_classes=["top-bar"]):
+                    browse_back_btn = gr.Button(
+                        "Back", variant="secondary", elem_classes=["back-chip"]
+                    )
+                    gr.HTML(
+                        '<button type="button" class="theme-toggle" aria-label="Toggle theme"></button>'
+                    )
+                gr.HTML(
+                    '<div class="section-title"><h2>Browse Properties</h2><span class="dim">Search saved detections</span></div>'
                 )
-
                 with gr.Row():
                     amenity_search_input = gr.Textbox(
-                        label="Search by amenity (comma-separated)",
-                        placeholder="e.g. refrigerator, sofa",
-                        scale=4,
+                        label="Search by amenity", placeholder="e.g. refrigerator, sofa", scale=4
                     )
                     search_btn = gr.Button("Search", variant="primary", scale=1)
                     list_all_btn = gr.Button("List All", scale=1)
-
-                results_table = gr.Dataframe(
-                    headers=["ID", "Name", "Description (preview)", "Model", "Images"],
-                    label="Properties",
-                    interactive=False,
-                    wrap=True,
-                )
-
+                property_cards = gr.HTML(list_property_cards())
                 gr.Markdown("### Property Details")
-                property_id_input = gr.Textbox(
-                    label="Property ID",
-                    placeholder="Paste an ID from the table above",
-                )
+                property_id_input = gr.Textbox(label="Property ID")
                 view_btn = gr.Button("View Details", variant="secondary")
                 property_detail_output = gr.Markdown("Enter a property ID above to view details.")
 
-                search_btn.click(
-                    fn=search_properties, inputs=[amenity_search_input], outputs=[results_table]
+        def _nav(page: str):
+            home, upload, browse, state = go_to(page)
+            return (
+                gr.update(**cast(Any, home)),
+                gr.update(**cast(Any, upload)),
+                gr.update(**cast(Any, browse)),
+                state,
+            )
+
+        def _upload_with_hints(*values: Any):
+            hints = _expanded_hints_from_sequence(cast(tuple[str | None, ...], tuple(values[8:])))
+            for step_html, status, state, description, next_upload_state in upload_and_detect(
+                values[0],
+                values[1],
+                values[2],
+                values[3],
+                values[4],
+                values[5],
+                values[6],
+                values[7],
+                hints,
+            ):
+                if state and str(status).startswith("Detected "):
+                    active = 3
+                elif str(status).startswith(
+                    (
+                        "Please ",
+                        "Upload failed",
+                        "Request timed out",
+                        "Cannot reach",
+                        "Unexpected error",
+                    )
+                ):
+                    active = 3
+                else:
+                    active = 2
+                yield (
+                    *[gr.update(visible=(i == active)) for i in range(4)],
+                    step_html,
+                    status,
+                    state,
+                    description,
+                    next_upload_state,
                 )
-                list_all_btn.click(fn=list_all_properties, inputs=[], outputs=[results_table])
-                view_btn.click(
-                    fn=get_property_detail,
-                    inputs=[property_id_input],
-                    outputs=[property_detail_output],
-                )
+
+        def _confirm_with_hints(*values: Any) -> tuple[str, str, str]:
+            hints = _expanded_hints_from_sequence(cast(tuple[str | None, ...], tuple(values[6:])))
+            return confirm_and_describe(
+                values[0],
+                values[1],
+                values[2],
+                values[3],
+                values[4],
+                values[5],
+                hints,
+            )
+
+        def _reconcile_with_hints(*values: Any) -> list[dict[str, Any]]:
+            hints = _expanded_hints_from_sequence(cast(tuple[str | None, ...], tuple(values[5:])))
+            return reconcile_state_from_hints(
+                values[0],
+                values[1],
+                values[2],
+                values[3],
+                values[4],
+                hints,
+            )
+
+        home_to_upload_btn.click(
+            lambda: _nav(UPLOAD), outputs=[home_group, upload_group, browse_group, page_state]
+        )
+        home_to_browse_btn.click(
+            lambda: _nav(BROWSE), outputs=[home_group, upload_group, browse_group, page_state]
+        )
+        upload_back_btn.click(
+            lambda: _nav(HOME), outputs=[home_group, upload_group, browse_group, page_state]
+        )
+        browse_back_btn.click(
+            lambda: _nav(HOME), outputs=[home_group, upload_group, browse_group, page_state]
+        )
+
+        legacy_hint_inputs: list[Any] = [
+            num_rooms_input,
+            hint_textboxes[HINT_KEYS.index("kitchen")],
+            hint_textboxes[HINT_KEYS.index("balcony")],
+            hint_textboxes[HINT_KEYS.index("living_room")],
+        ]
+
+        # ── Step navigation: visibility + step indicator ──
+        step_panels = [step1_config, step2_upload, step3_detect, step4_review]
+
+        def _show_step(active: int) -> list[Any]:
+            """Return Gradio updates that show only the requested step group."""
+            return [gr.update(visible=(i == active)) for i in range(4)] + [_step_html(active)]
+
+        step1_next_btn.click(
+            fn=lambda: _show_step(1),
+            outputs=[*step_panels, step_indicator],
+            queue=False,
+        )
+        step2_back_btn.click(
+            fn=lambda: _show_step(0),
+            outputs=[*step_panels, step_indicator],
+            queue=False,
+        )
+        step4_back_btn.click(
+            fn=lambda: _show_step(1),
+            outputs=[*step_panels, step_indicator],
+            queue=False,
+        )
+
+        # Detect: jump to step 3 (animation), run detection, then jump to step 4.
+        step2_detect_btn.click(
+            fn=lambda: _show_step(2),
+            outputs=[*step_panels, step_indicator],
+            queue=False,
+        ).then(
+            fn=_upload_with_hints,
+            inputs=[
+                image_files,
+                property_name_input,
+                model_dropdown,
+                extra_info_input,
+                *legacy_hint_inputs,
+                *hint_textboxes,
+            ],
+            outputs=[
+                *step_panels,
+                step_indicator,
+                upload_status,
+                review_state,
+                description_output,
+                upload_state,
+            ],
+        )
+
+        confirm_btn.click(
+            fn=_confirm_with_hints,
+            inputs=[review_state, upload_state, *legacy_hint_inputs, *hint_textboxes],
+            outputs=[step_indicator, upload_status, description_output],
+        )
+        review_action_apply.click(
+            fn=apply_review_action,
+            inputs=[review_action_payload, review_state],
+            outputs=[review_state],
+            queue=False,
+        )
+        for hint in [num_rooms_input, *hint_textboxes]:
+            hint.change(
+                fn=_reconcile_with_hints,
+                inputs=[*legacy_hint_inputs, review_state, *hint_textboxes],
+                outputs=[review_state],
+            )
+        search_btn.click(
+            fn=search_property_cards, inputs=[amenity_search_input], outputs=[property_cards]
+        )
+        list_all_btn.click(fn=list_property_cards, inputs=[], outputs=[property_cards])
+        view_btn.click(
+            fn=get_property_detail, inputs=[property_id_input], outputs=[property_detail_output]
+        )
 
     return cast(gr.Blocks, demo)
 
@@ -1288,5 +1590,6 @@ if __name__ == "__main__":
         server_name="0.0.0.0",
         server_port=int(os.getenv("GRADIO_PORT", "7860")),
         theme=_build_theme(),
-        css=_CSS,
+        css=CSS,
+        head=HEAD,
     )

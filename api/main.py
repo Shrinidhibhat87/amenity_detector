@@ -33,6 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator  # type: ignore[import-untyped]
 
 from api.middleware import RequestLoggingMiddleware
+from api.routers import images as images_router
 from api.routers import models as models_router
 from api.routers import properties as properties_router
 from api.schemas import HealthResponse
@@ -128,6 +129,7 @@ Instrumentator().instrument(app).expose(app)
 # Include the two routers — each router prefixes its own routes
 app.include_router(properties_router.router)
 app.include_router(models_router.router)
+app.include_router(images_router.router)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["health"])

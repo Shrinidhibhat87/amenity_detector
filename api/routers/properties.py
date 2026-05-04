@@ -176,6 +176,7 @@ def list_properties(
         PropertySummaryResponse(
             **{k: v for k, v in prop.__dict__.items() if not k.startswith("_")},
             image_count=len(prop.images),
+            first_image_id=prop.images[0].id if prop.images else None,
         )
         for prop in properties
     ]
@@ -212,6 +213,7 @@ def search_properties(
         PropertySummaryResponse(
             **{k: v for k, v in prop.__dict__.items() if not k.startswith("_")},
             image_count=len(prop.images),
+            first_image_id=prop.images[0].id if prop.images else None,
         )
         for prop in properties
     ]
@@ -275,6 +277,7 @@ def regenerate_description(
             has_kitchen=body.has_kitchen,
             has_balcony=body.has_balcony,
             has_living_room=body.has_living_room,
+            hints=body.hints,
         )
     except Exception as e:
         logger.exception("Description regeneration failed for property '%s'", property_id)

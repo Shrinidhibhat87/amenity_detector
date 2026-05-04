@@ -162,6 +162,7 @@ class PropertyAmenitySystem:
         has_kitchen: bool | None = None,
         has_balcony: bool | None = None,
         has_living_room: bool | None = None,
+        hints: dict[str, bool] | None = None,
     ) -> str:
         """
         Generate a property description from a user-edited amenity list.
@@ -178,6 +179,7 @@ class PropertyAmenitySystem:
             has_kitchen:   Optional user hint for kitchen presence.
             has_balcony:   Optional user hint for balcony presence.
             has_living_room: Optional user hint for living room presence.
+            hints:         Optional expanded amenity hint dict.
 
         Returns:
             A natural-language description string from the VLM.
@@ -198,17 +200,18 @@ class PropertyAmenitySystem:
         room_lines = "\n".join(
             f"  - {room.title()}: {', '.join(items)}" for room, items in by_room.items()
         )
-        hints = _format_sidebar_hints(
+        hints_text = _format_sidebar_hints(
             num_rooms=num_rooms,
             has_kitchen=has_kitchen,
             has_balcony=has_balcony,
             has_living_room=has_living_room,
+            hints=hints,
         )
         context_parts = []
         if extra_info:
             context_parts.append(f"Additional context: {extra_info}.")
-        if hints:
-            context_parts.append(f"User-provided property hints: {hints}.")
+        if hints_text:
+            context_parts.append(f"User-provided property hints: {hints_text}.")
         context = " " + " ".join(context_parts) if context_parts else ""
         prompt = (
             f"You are writing a property listing description for '{property_name}'.{context}\n"
@@ -262,27 +265,33 @@ def _format_sidebar_hints(
     has_kitchen: bool | None = None,
     has_balcony: bool | None = None,
     has_living_room: bool | None = None,
+    hints: dict[str, bool] | None = None,
 ) -> str:
     """
     Convert optional UI hints into concise prompt text.
 
     Unspecified values are omitted entirely so the model does not treat missing
-    UI input as a negative signal.
+    UI input as a negative signal. The expanded hints dict is additive and wins
+    over the legacy three flags when both provide the same concept.
     """
+    merged: dict[str, bool] = {}
+    legacy = {
+        "kitchen": has_kitchen,
+        "balcony": has_balcony,
+        "living room": has_living_room,
+    }
+    for label, value in legacy.items():
+        if value is not None:
+            merged[label] = value
+    if hints:
+        for key, value in hints.items():
+            if value is not None:
+                merged[key.replace("_", " ")] = bool(value)
+
     parts: list[str] = []
     if num_rooms is not None and num_rooms > 0:
         noun = "room" if num_rooms == 1 else "rooms"
         parts.append(f"{num_rooms} {noun}")
-
-    bool_hints = [
-        ("kitchen", has_kitchen),
-        ("balcony", has_balcony),
-        ("living room", has_living_room),
-    ]
-    for label, value in bool_hints:
-        if value is True:
-            parts.append(f"has a {label}")
-        elif value is False:
-            parts.append(f"no {label}")
-
+    for label, value in merged.items():
+        parts.append(f"has a {label}" if value else f"no {label}")
     return ", ".join(parts)
