@@ -68,7 +68,12 @@ def from_detections(images: list[dict[str, Any]]) -> State:
         if block is None:
             block = {"room": room, "items": []}
             state.append(block)
+        existing_names = {i["name"].lower().strip() for i in block["items"]}
         for amenity in image.get("amenities", []):
+            key = amenity["amenity_name"].lower().strip()
+            if key in existing_names:
+                continue
+            existing_names.add(key)
             block["items"].append(
                 {
                     "id": _new_id(),

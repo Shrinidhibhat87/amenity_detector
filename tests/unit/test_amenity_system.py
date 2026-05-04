@@ -305,3 +305,42 @@ def test_generate_description_includes_sidebar_hints(tmp_path: Path) -> None:
     assert "has a kitchen" in prompt_used
     assert "no balcony" in prompt_used
     assert "has a living room" in prompt_used
+
+
+def test_format_sidebar_hints_includes_extended_dict() -> None:
+    from core.amenity_system import _format_sidebar_hints
+
+    out = _format_sidebar_hints(
+        num_rooms=2,
+        has_kitchen=True,
+        has_balcony=None,
+        has_living_room=None,
+        hints={"elevator": True, "garage": False, "fireplace": True},
+    )
+
+    assert "2 rooms" in out
+    assert "has a kitchen" in out
+    assert "has a elevator" in out
+    assert "no garage" in out
+    assert "has a fireplace" in out
+
+
+def test_generate_description_includes_expanded_hints(tmp_path: Path) -> None:
+    mock_vlm = MagicMock()
+    mock_vlm.generate.return_value = VLMResponse(raw_text="A bright apartment.", model_name="test")
+
+    system = PropertyAmenitySystem(
+        vlm_client=mock_vlm,
+        db=MagicMock(),
+        image_storage_dir=tmp_path,
+    )
+
+    system.generate_description_from_amenities(
+        amenities=[{"amenity_name": "Sofa", "room_type": "living_room", "is_present": True}],
+        property_name="Hinted House",
+        hints={"elevator": True, "pet_friendly": False},
+    )
+
+    prompt_used: str = mock_vlm.generate.call_args.kwargs["prompt"]
+    assert "has a elevator" in prompt_used
+    assert "no pet friendly" in prompt_used

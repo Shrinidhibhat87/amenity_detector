@@ -24,16 +24,17 @@ The local Docker Compose stack runs:
 | Observability | Done | Structured logging, request logs, Prometheus, Grafana dashboard |
 | CI | Done | Ruff lint/format, mypy, and unit tests |
 
-Recent work added the Phase 5/6 flow:
+Recent work added the frontend revamp flow:
 
-1. Create a property shell.
-2. Upload and process one image at a time.
+1. Start on Home and choose `Upload & Detect` or `Browse Properties`.
+2. Create a property shell and upload/process one image at a time.
 3. Detect room type and amenities from one structured JSON VLM response.
-4. Show incremental progress in the UI.
+4. Set any of the 18 grouped amenity hints with segmented pills.
 5. Review amenities grouped by room.
 6. Confirm, edit, reject, or add amenities.
-7. Reconcile property hints against detections.
+7. Reconcile expanded property hints against detections.
 8. Generate the final description from the reviewed state.
+9. Browse saved properties as thumbnail cards powered by the image endpoint.
 
 ## Features
 
@@ -49,9 +50,11 @@ Recent work added the Phase 5/6 flow:
 - Image preprocessing with longest-edge resize to 768 px.
 - Per-room review UI powered by `gr.render`.
 - Row-level actions: confirm, edit, reject, add amenity.
-- User hints for room count, kitchen, balcony, and living room.
+- Explicit light/dark theme toggle persisted in the browser.
+- Expanded property hints with 18 items across rooms, outdoor, access/storage,
+  and features.
 - Description regeneration from reviewed amenities and user hints.
-- Browse/search UI for stored properties.
+- Browse/search UI for stored properties with lazy image thumbnails.
 - FastAPI OpenAPI docs at `/docs`.
 - Prometheus metrics endpoint at `/metrics`.
 - Grafana dashboard provisioning through Docker Compose.
@@ -140,16 +143,16 @@ Expected shape:
 ## Using The App
 
 1. Open http://localhost:7860.
-2. Go to `Upload & Detect`.
+2. Click `Upload & Detect`.
 3. Upload 2-3 representative property images.
 4. Enter a property name.
 5. Select a model.
-6. Optionally fill property hints.
+6. Optionally fill property hints with the segmented pill controls.
 7. Click `Upload & Detect Amenities`.
 8. Review the detected amenities grouped by room.
 9. Confirm, edit, reject, or add amenities as needed.
 10. Click `Confirm & Generate Description`.
-11. Use `Browse Properties` to list, search, and inspect stored properties.
+11. Use `Back`, then `Browse Properties`, to list, search, and inspect stored properties.
 
 Default model is `openai/gpt-4o-mini` — cheapest reliable option. Switch to
 `google/gemini-pro-1.5`, `meta-llama/llama-3.2-11b-vision-instruct`, or
@@ -166,6 +169,7 @@ https://openrouter.ai/models.
 | `GET` | `/api/v1/properties/` | List properties |
 | `GET` | `/api/v1/properties/{id}` | Get full property details |
 | `GET` | `/api/v1/properties/search` | Search by amenity names |
+| `GET` | `/api/v1/images/{id}` | Serve stored image bytes for thumbnails |
 | `DELETE` | `/api/v1/properties/{id}` | Delete a property |
 | `GET` | `/api/v1/models/` | List available models |
 | `GET` | `/health` | Health check |

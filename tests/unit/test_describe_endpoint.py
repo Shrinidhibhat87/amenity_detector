@@ -136,6 +136,26 @@ def _make_property(db: Session, name: str = "Test House") -> Property:
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 
+def test_describe_request_accepts_hints_field() -> None:
+    from api.schemas import DescribeRequest
+
+    body = DescribeRequest(
+        amenities=[],
+        model_name="openai/gpt-4o-mini",
+        hints={"kitchen": True, "balcony": False, "elevator": True},
+    )
+
+    assert body.hints == {"kitchen": True, "balcony": False, "elevator": True}
+
+
+def test_describe_request_defaults_hints_to_none() -> None:
+    from api.schemas import DescribeRequest
+
+    body = DescribeRequest(amenities=[], model_name="openai/gpt-4o-mini")
+
+    assert body.hints is None
+
+
 def test_describe_returns_description(client: TestClient, in_memory_db: Session) -> None:
     """Happy path: valid property + valid model → returns description string."""
     prop = _make_property(in_memory_db)
@@ -184,6 +204,30 @@ def test_describe_passes_sidebar_hints_to_prompt(
     assert "has a kitchen" in prompt_used
     assert "no balcony" in prompt_used
     assert "has a living room" in prompt_used
+
+
+def test_describe_passes_expanded_hints_to_prompt(
+    client: TestClient,
+    in_memory_db: Session,
+    mock_vlm: MagicMock,
+) -> None:
+    prop = _make_property(in_memory_db)
+
+    response = client.post(
+        f"/api/v1/properties/{prop.id}/describe",
+        json={
+            "amenities": [
+                {"amenity_name": "Sofa", "room_type": "living_room", "is_present": True},
+            ],
+            "model_name": "openai/gpt-4o-mini",
+            "hints": {"elevator": True, "garage": False},
+        },
+    )
+
+    assert response.status_code == 200
+    prompt_used: str = mock_vlm.generate.call_args.kwargs["prompt"]
+    assert "has a elevator" in prompt_used
+    assert "no garage" in prompt_used
 
 
 def test_describe_returns_404_for_unknown_property(client: TestClient) -> None:

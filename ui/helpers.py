@@ -21,6 +21,26 @@ _KITCHEN_TERMS = {
 }
 _BALCONY_TERMS = {"balcony", "terrace", "patio", "outdoor seating"}
 _LIVING_ROOM_TERMS = {"living_room", "living room", "sofa", "couch", "tv", "television"}
+_EXTENDED_HINT_TERMS: dict[str, set[str]] = {
+    "kitchen": _KITCHEN_TERMS,
+    "living_room": _LIVING_ROOM_TERMS,
+    "bedroom": {"bedroom", "bed", "wardrobe", "nightstand", "dresser"},
+    "bathroom": {"bathroom", "bath", "bathtub", "toilet", "shower", "sink", "vanity"},
+    "dining_room": {"dining_room", "dining room", "dining table", "table"},
+    "balcony": _BALCONY_TERMS,
+    "terrace": {"terrace", "patio", "deck"},
+    "garden": {"garden", "yard", "lawn", "backyard"},
+    "pool": {"pool", "swimming pool"},
+    "garage": {"garage", "garage door"},
+    "parking": {"parking", "driveway", "carport"},
+    "elevator": {"elevator", "lift"},
+    "storage": {"storage", "closet", "cupboard", "pantry"},
+    "fireplace": {"fireplace", "hearth", "chimney"},
+    "air_conditioning": {"air_conditioning", "air conditioning", "ac", "a/c"},
+    "heating": {"heating", "heater", "radiator"},
+    "furnished": {"furnished", "sofa", "bed", "table", "chair"},
+    "pet_friendly": {"pet", "dog", "cat", "pet friendly"},
+}
 
 
 def reconcile_amenities(sidebar: dict[str, Any], rows: list[list[Any]]) -> list[list[Any]]:
@@ -41,6 +61,7 @@ def reconcile_amenities(sidebar: dict[str, Any], rows: list[list[Any]]) -> list[
     has_kitchen = sidebar.get("has_kitchen")
     has_balcony = sidebar.get("has_balcony")
     has_living_room = sidebar.get("has_living_room")
+    expanded_hints = sidebar.get("hints") or {}
 
     room_order = _distinct_present_rooms(rows)
     allowed_rooms = set(room_order[:num_rooms]) if num_rooms is not None else set(room_order)
@@ -60,6 +81,13 @@ def reconcile_amenities(sidebar: dict[str, Any], rows: list[list[Any]]) -> list[
                 mismatch = True
             if has_living_room is False and _matches_any(room, amenity, _LIVING_ROOM_TERMS):
                 mismatch = True
+            for hint_key, hint_value in expanded_hints.items():
+                if hint_value is False and _matches_any(
+                    room,
+                    amenity,
+                    _EXTENDED_HINT_TERMS.get(str(hint_key), {str(hint_key).replace("_", " ")}),
+                ):
+                    mismatch = True
             if num_rooms is not None and room and room not in allowed_rooms:
                 mismatch = True
 

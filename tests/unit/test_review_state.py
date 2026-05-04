@@ -280,6 +280,35 @@ def test_amenities_for_describe_strips_warning_prefix() -> None:
     assert {"room_type": "kitchen", "amenity_name": "refrigerator", "is_present": True} in payload
 
 
+def test_apply_review_action_confirm_edit_reject_save_add() -> None:
+    """The Gradio UI routes all HTML review buttons through this stable handler."""
+    from ui.app import apply_review_action
+
+    state = _sample_state()
+    first_id = state[0]["items"][0]["id"]
+    second_id = state[0]["items"][1]["id"]
+
+    state = apply_review_action(f'{{"action":"confirm","id":"{first_id}"}}', state)
+    assert state[0]["items"][0]["status"] == "confirmed"
+
+    state = apply_review_action(f'{{"action":"edit","id":"{first_id}"}}', state)
+    assert state[0]["items"][0]["status"] == "editing"
+
+    state = apply_review_action(
+        f'{{"action":"save","id":"{first_id}","name":"Dishwasher","present":false}}',
+        state,
+    )
+    assert state[0]["items"][0]["name"] == "Dishwasher"
+    assert state[0]["items"][0]["present"] is False
+    assert state[0]["items"][0]["status"] == "confirmed"
+
+    state = apply_review_action(f'{{"action":"reject","id":"{second_id}"}}', state)
+    assert [item["id"] for item in state[0]["items"]] == [first_id]
+
+    state = apply_review_action('{"action":"add","room":"kitchen"}', state)
+    assert state[0]["items"][-1]["status"] == "editing"
+
+
 # ── apply_reconciled_names ───────────────────────────────────────────────────
 
 
