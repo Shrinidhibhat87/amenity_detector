@@ -57,6 +57,7 @@ logger = logging.getLogger("ui")
 # ── Configuration ──────────────────────────────────────────────────────────────
 _API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 _TIMEOUT_SECONDS = 300  # VLM inference can be slow on local GPU
+_PER_IMAGE_TIMEOUT_SECONDS = 5  # Per-image HTTP timeout. Slow VLMs are skipped.
 
 
 # ── Helper functions ───────────────────────────────────────────────────────────
@@ -533,6 +534,28 @@ def _step_html(active: int) -> str:
 # ── Upload tab handlers ────────────────────────────────────────────────────────
 
 
+def _build_progress_status(index: int, total: int, skipped: list[dict[str, str]]) -> str:
+    """Compose the status banner shown while images are still streaming in."""
+    base = (
+        f"{index}/{total} images processed. You can keep editing the hints "
+        "while detection continues."
+    )
+    if skipped:
+        names = ", ".join(s["filename"] for s in skipped)
+        base += f" Skipped {len(skipped)} image(s): {names}."
+    return base
+
+
+def _build_final_status(property_name: str, total_items: int, skipped: list[dict[str, str]]) -> str:
+    """Compose the post-detection status banner with skip details if any."""
+    base = f"Detected {total_items} amenities for '{property_name}'."
+    if skipped:
+        details = "; ".join(f"{s['filename']} ({s['reason']})" for s in skipped)
+        base += f" {len(skipped)} image(s) were not processed and have been excluded: {details}."
+    base += " Review per-room below, then click Confirm."
+    return base
+
+
 def _reconciled_review_state(
     images: list[dict[str, Any]],
     sidebar: dict[str, Any],
@@ -617,34 +640,69 @@ def upload_and_detect(
         upload_state = {"property_id": property_id, "model_name": model_name}
 
         total = len(files)
+        skipped: list[dict[str, str]] = []
         for index, file_obj in enumerate(files, start=1):
             filename, content, mime = _open_upload_file(file_obj)
             progress((index - 1) / total, desc=f"Processing {filename} ({index}/{total})")
 
-            image_response = requests.post(
-                f"{_API_BASE_URL}/api/v1/properties/{property_id}/images",
-                data={"model_name": model_name},
-                files={"file": (filename, content, mime)},
-                timeout=_TIMEOUT_SECONDS,
-            )
-            image_response.raise_for_status()
+            try:
+                image_response = requests.post(
+                    f"{_API_BASE_URL}/api/v1/properties/{property_id}/images",
+                    data={"model_name": model_name},
+                    files={"file": (filename, content, mime)},
+                    timeout=_PER_IMAGE_TIMEOUT_SECONDS,
+                )
+                image_response.raise_for_status()
+            except requests.exceptions.Timeout:
+                skipped.append(
+                    {
+                        "filename": filename,
+                        "reason": f"timed out after {_PER_IMAGE_TIMEOUT_SECONDS}s",
+                    }
+                )
+                logger.warning(
+                    "Image %s timed out after %ds; skipping",
+                    filename,
+                    _PER_IMAGE_TIMEOUT_SECONDS,
+                )
+                review_state = _reconciled_review_state(seen_images, sidebar)
+                yield (
+                    _step_html(2),
+                    _build_progress_status(index, total, skipped),
+                    review_state,
+                    "",
+                    upload_state,
+                )
+                continue
+            except requests.exceptions.HTTPError as exc:
+                code = getattr(exc.response, "status_code", "?")
+                skipped.append({"filename": filename, "reason": f"HTTP {code}"})
+                logger.warning("Image %s failed (HTTP %s); skipping", filename, code)
+                review_state = _reconciled_review_state(seen_images, sidebar)
+                yield (
+                    _step_html(2),
+                    _build_progress_status(index, total, skipped),
+                    review_state,
+                    "",
+                    upload_state,
+                )
+                continue
 
             image_data: dict[str, Any] = image_response.json().get("image", {})
             seen_images.append(image_data)
             review_state = _reconciled_review_state(seen_images, sidebar)
-            status = (
-                f"{index}/{total} images processed. You can keep editing the hints "
-                "while detection continues."
+            yield (
+                _step_html(2),
+                _build_progress_status(index, total, skipped),
+                review_state,
+                "",
+                upload_state,
             )
-            yield _step_html(2), status, review_state, "", upload_state
 
         progress(1.0, desc="Detection complete")
         review_state = _reconciled_review_state(seen_images, sidebar)
         total_items = sum(len(block["items"]) for block in review_state)
-        status = (
-            f"Detected {total_items} amenities for '{property_name}'. "
-            "Review per-room below, then click Confirm."
-        )
+        status = _build_final_status(property_name, total_items, skipped)
         yield _step_html(3), status, review_state, "", upload_state
 
     except requests.exceptions.Timeout:

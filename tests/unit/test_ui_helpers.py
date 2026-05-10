@@ -213,3 +213,142 @@ def test_build_app_smoke_returns_blocks() -> None:
     app = build_app()
 
     assert isinstance(app, gr.Blocks)
+
+
+# ── Per-image timeout / skip-on-failure status helpers ──────────────────────
+
+
+def test_build_progress_status_no_skipped() -> None:
+    """Without skipped images, the status reads cleanly."""
+    from ui.app import _build_progress_status
+
+    text = _build_progress_status(2, 5, [])
+
+    assert "2/5 images processed" in text
+    assert "Skipped" not in text
+
+
+def test_build_progress_status_includes_skipped_filenames() -> None:
+    """Skipped images are listed by filename so the user can tell what failed."""
+    from ui.app import _build_progress_status
+
+    skipped = [
+        {"filename": "blurry.jpg", "reason": "timed out after 5s"},
+        {"filename": "huge.png", "reason": "HTTP 502"},
+    ]
+
+    text = _build_progress_status(3, 5, skipped)
+
+    assert "blurry.jpg" in text
+    assert "huge.png" in text
+    assert "Skipped 2 image" in text
+
+
+def test_build_final_status_no_skipped() -> None:
+    """Final banner just summarises detected counts when nothing was skipped."""
+    from ui.app import _build_final_status
+
+    text = _build_final_status("Sunny Flat", 7, [])
+
+    assert "Detected 7 amenities for 'Sunny Flat'" in text
+    assert "not processed" not in text
+
+
+def test_build_final_status_calls_out_skipped_with_reason() -> None:
+    """When images time out the final banner spells out which file and why."""
+    from ui.app import _build_final_status
+
+    skipped = [{"filename": "balcony.jpg", "reason": "timed out after 5s"}]
+
+    text = _build_final_status("City Loft", 4, skipped)
+
+    assert "1 image(s) were not processed" in text
+    assert "balcony.jpg" in text
+    assert "timed out after 5s" in text
+
+
+def test_per_image_timeout_constant_is_five_seconds() -> None:
+    """Spec lock-in: per-image HTTP timeout must stay at 5 seconds.
+
+    If you bump it, update SPEC and the user-facing messaging at the same
+    time. The flow and tests both rely on this number being in the status
+    text, so a silent change would mislead users.
+    """
+    from ui.app import _PER_IMAGE_TIMEOUT_SECONDS
+
+    assert _PER_IMAGE_TIMEOUT_SECONDS == 5
+
+
+def test_upload_and_detect_skips_image_on_timeout(monkeypatch) -> None:
+    """A 5-second timeout on one image must not abort the whole upload."""
+    from unittest.mock import MagicMock
+
+    import requests as _requests
+
+    from ui import app as ui_app
+
+    create_response = MagicMock()
+    create_response.json.return_value = {"property_id": "prop-1"}
+    create_response.raise_for_status = MagicMock()
+
+    ok_image_response = MagicMock()
+    ok_image_response.json.return_value = {
+        "image": {
+            "id": "img-1",
+            "file_path": "/storage/ok.jpg",
+            "room_type": "kitchen",
+            "amenities": [{"amenity_name": "refrigerator", "is_present": True, "confidence": 0.9}],
+        }
+    }
+    ok_image_response.raise_for_status = MagicMock()
+
+    call_log: list[str] = []
+
+    def fake_post(url: str, **kwargs):  # type: ignore[no-untyped-def]
+        if url.endswith("/api/v1/properties/"):
+            call_log.append("create")
+            return create_response
+        # Per-image POST: first call times out, second succeeds.
+        files = kwargs.get("files") or {}
+        filename = files["file"][0] if "file" in files else ""
+        call_log.append(f"image:{filename}")
+        if filename == "slow.jpg":
+            raise _requests.exceptions.Timeout("simulated 5s timeout")
+        return ok_image_response
+
+    monkeypatch.setattr(ui_app.requests, "post", fake_post)
+
+    file_obj_slow = MagicMock()
+    file_obj_slow.name = "/tmp/slow.jpg"
+    file_obj_ok = MagicMock()
+    file_obj_ok.name = "/tmp/ok.jpg"
+
+    def fake_open_upload_file(file_obj):  # type: ignore[no-untyped-def]
+        if file_obj is file_obj_slow:
+            return ("slow.jpg", b"x", "image/jpeg")
+        return ("ok.jpg", b"y", "image/jpeg")
+
+    monkeypatch.setattr(ui_app, "_open_upload_file", fake_open_upload_file)
+
+    yields = list(
+        ui_app.upload_and_detect(
+            files=[file_obj_slow, file_obj_ok],
+            property_name="Test Loft",
+            model_name="openai/gpt-4o-mini",
+            extra_info="",
+            num_rooms=0,
+            kitchen_hint="Not specified",
+            balcony_hint="Not specified",
+            living_room_hint="Not specified",
+            expanded_hints=None,
+            listing_metadata=None,
+            progress=MagicMock(),
+        )
+    )
+
+    assert call_log == ["create", "image:slow.jpg", "image:ok.jpg"]
+    final_status = yields[-1][1]
+    assert "1 image(s) were not processed" in final_status
+    assert "slow.jpg" in final_status
+    assert "timed out after 5s" in final_status
+    assert "Detected" in final_status
