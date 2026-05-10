@@ -1515,10 +1515,7 @@ def build_app() -> gr.Blocks:
                     upload_status = gr.Textbox(label="Status", interactive=False)
                     gr.Markdown("#### Detected Amenities")
                     with gr.Column(elem_id="review-cards-grid"):
-
-                        @gr.render(inputs=[review_state])
-                        def render_review_panel(state: list[dict[str, Any]]) -> None:
-                            _render_review_panel(state, review_state)
+                        review_html = gr.HTML(value=_review_panel_html([]))
 
                     review_action_payload = gr.Textbox(
                         value="",
@@ -1718,6 +1715,11 @@ def build_app() -> gr.Blocks:
                 description_output,
                 upload_state,
             ],
+        ).then(
+            fn=_review_panel_html,
+            inputs=[review_state],
+            outputs=[review_html],
+            queue=False,
         )
 
         confirm_btn.click(
@@ -1730,12 +1732,22 @@ def build_app() -> gr.Blocks:
             inputs=[review_action_payload, review_state],
             outputs=[review_state],
             queue=False,
+        ).then(
+            fn=_review_panel_html,
+            inputs=[review_state],
+            outputs=[review_html],
+            queue=False,
         )
         for hint in [num_rooms_input, *hint_textboxes]:
             hint.change(
                 fn=_reconcile_with_hints,
                 inputs=[*legacy_hint_inputs, review_state, *hint_textboxes],
                 outputs=[review_state],
+            ).then(
+                fn=_review_panel_html,
+                inputs=[review_state],
+                outputs=[review_html],
+                queue=False,
             )
         search_btn.click(
             fn=search_property_cards, inputs=[amenity_search_input], outputs=[property_cards]
