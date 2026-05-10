@@ -34,6 +34,7 @@ from api.schemas import (
     PropertyDetailResponse,
     PropertyImageResponse,
     PropertySummaryResponse,
+    PropertyUpdateRequest,
 )
 from core.amenity_data_manager import AmenityDataManager
 from core.amenity_system import PropertyAmenitySystem
@@ -70,6 +71,14 @@ def create_property(
     except KeyError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    # Pull the optional Phase 9 listing fields off the request body. We use
+    # ``model_dump(exclude_unset=True)`` so a missing field stays NULL rather
+    # than being overwritten with the schema default.
+    metadata = body.model_dump(
+        exclude={"name", "model_name", "extra_info"},
+        exclude_unset=True,
+    )
+
     try:
         system = PropertyAmenitySystem(
             vlm_client=vlm_client,
@@ -80,6 +89,7 @@ def create_property(
             property_name=name,
             model_name=body.model_name,
             extra_info=body.extra_info.strip() if body.extra_info else None,
+            listing_metadata=metadata or None,
         )
     except Exception as e:
         logger.exception("Property shell creation failed for property '%s'", name)
@@ -90,6 +100,35 @@ def create_property(
         message=f"Property '{prop.name}' created successfully.",
         property=_build_detail_response(prop),
     )
+
+
+@router.patch("/{property_id}", response_model=PropertyDetailResponse)
+def patch_property(
+    property_id: str,
+    body: PropertyUpdateRequest,
+    db: Session = Depends(get_db),
+) -> PropertyDetailResponse:
+    """
+    Update one or more listing-metadata fields on an existing property.
+
+    Only fields actually present in the request body are written. Sending
+    ``null`` for a field clears it; omitting the field leaves it untouched.
+
+    The ``slug`` field is intentionally not patchable — keeping public URLs
+    stable is the whole point of having a slug. The Pydantic schema rejects
+    unknown keys with HTTP 422.
+    """
+    fields = body.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields provided to update.")
+
+    manager = AmenityDataManager(db)
+    updated = manager.update_property(property_id, fields)
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Property '{property_id}' not found.")
+    db.commit()
+    db.refresh(updated)
+    return _build_detail_response(updated)
 
 
 @router.post("/{property_id}/images", response_model=ImageDetectionResponse, status_code=201)
@@ -339,6 +378,27 @@ def delete_property(
 # ── Helper ───────────────────────────────────────────────────────────────────
 
 
+_PROPERTY_METADATA_FIELDS = (
+    "slug",
+    "listing_type",
+    "price",
+    "currency",
+    "price_period",
+    "num_bedrooms",
+    "num_bathrooms",
+    "area_sqm",
+    "property_type",
+    "furnishing",
+    "available_from",
+    "locality",
+    "postal_code",
+    "country_code",
+    "latitude",
+    "longitude",
+    "owner_email",
+)
+
+
 def _build_detail_response(prop: object) -> PropertyDetailResponse:
     """
     Convert a Property ORM object into a PropertyDetailResponse Pydantic model.
@@ -359,6 +419,8 @@ def _build_detail_response(prop: object) -> PropertyDetailResponse:
 
     image_responses = [_build_image_response(img) for img in prop.images]
 
+    metadata = {field: getattr(prop, field) for field in _PROPERTY_METADATA_FIELDS}
+
     return PropertyDetailResponse(
         id=prop.id,
         name=prop.name,
@@ -367,6 +429,7 @@ def _build_detail_response(prop: object) -> PropertyDetailResponse:
         extra_info=prop.extra_info,
         created_at=prop.created_at,
         images=image_responses,
+        **metadata,
     )
 
 
@@ -390,4 +453,8 @@ def _build_image_response(img: object) -> PropertyImageResponse:
             )
             for a in img.amenities
         ],
+        alt_text=img.alt_text,
+        caption=img.caption,
+        is_primary=img.is_primary,
+        display_order=img.display_order,
     )

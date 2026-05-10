@@ -16,11 +16,13 @@ The local Docker Compose stack runs:
 
 | Component | Status | Purpose |
 |---|---:|---|
-| Gradio UI | Done | Upload, per-room amenity review, property hints, browse/search |
-| FastAPI API | Done | Property, image, model, search, and description endpoints |
-| PostgreSQL | Done | Stores properties, images, and detected amenities |
+| Gradio UI | Done | Upload, listing-details accordion, per-room amenity review, browse/search |
+| FastAPI API | Done | Property/image CRUD, search, description, and listing-metadata PATCH endpoints |
+| PostgreSQL | Done | Stores properties, images, detected amenities, and Phase 9 listing metadata |
+| Alembic migrations | Done | Schema versioning (`0001_phase8_baseline` → `0002_phase9_listing_metadata`) |
 | VLM provider | Done | OpenRouter (OpenAI-compatible) backs every supported model |
 | Image preprocessing | Done | Resizes images before inference to reduce VLM latency |
+| VLM-generated alt text | Done | Same prompt that detects amenities also returns `alt_text` + `room_caption` |
 | Observability | Done | Structured logging, request logs, Prometheus, Grafana dashboard |
 | CI | Done | Ruff lint/format, mypy, and unit tests |
 
@@ -47,6 +49,15 @@ Recent work added the frontend revamp flow:
   - `qwen/qwen2-vl-72b-instruct`
 - Structured JSON amenity detection with confidence scores.
 - Room classification from the same VLM call as amenity detection.
+- VLM-generated `alt_text` and `room_caption` per image (Phase 9), reused by
+  Phase 12 listing pages and JSON-LD; fully editable via the image PATCH
+  endpoint.
+- Listing metadata on every new property: type (rent/sale), price + currency
+  + period, bedrooms / bathrooms / area, property type, furnishing, locality,
+  postal code, country code, available-from date, owner email.
+- URL-safe `slug` auto-generated from `name + UUID prefix`, immutable for
+  the lifetime of the property — used by the upcoming Phase 12 public
+  routes.
 - Image preprocessing with longest-edge resize to 768 px.
 - Per-room review UI powered by `gr.render`.
 - Row-level actions: confirm, edit, reject, add amenity.
@@ -144,15 +155,20 @@ Expected shape:
 
 1. Open http://localhost:7860.
 2. Click `Upload & Detect`.
-3. Upload 2-3 representative property images.
-4. Enter a property name.
-5. Select a model.
+3. Enter a property name.
+4. Select a model.
+5. Optionally open the **Listing details** accordion and fill in any subset
+   of: listing type, price + currency + period, property type, furnishing,
+   bedrooms, bathrooms, area, available-from date, locality, postal code,
+   country code, owner email. Empty fields stay NULL on the row and can be
+   patched later via `PATCH /api/v1/properties/{id}`.
 6. Optionally fill property hints with the segmented pill controls.
-7. Click `Upload & Detect Amenities`.
-8. Review the detected amenities grouped by room.
-9. Confirm, edit, reject, or add amenities as needed.
-10. Click `Confirm & Generate Description`.
-11. Use `Back`, then `Browse Properties`, to list, search, and inspect stored properties.
+7. Upload 2-3 representative property images.
+8. Click `Upload & Detect Amenities`.
+9. Review the detected amenities grouped by room.
+10. Confirm, edit, reject, or add amenities as needed.
+11. Click `Confirm & Generate Description`.
+12. Use `Back`, then `Browse Properties`, to list, search, and inspect stored properties.
 
 Default model is `openai/gpt-4o-mini` — cheapest reliable option. Switch to
 `google/gemini-pro-1.5`, `meta-llama/llama-3.2-11b-vision-instruct`, or
@@ -163,13 +179,15 @@ https://openrouter.ai/models.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/v1/properties/` | Create an empty property shell |
+| `POST` | `/api/v1/properties/` | Create an empty property shell with optional listing metadata |
+| `PATCH` | `/api/v1/properties/{id}` | Update listing metadata after creation (slug is immutable) |
 | `POST` | `/api/v1/properties/{id}/images` | Upload and process one image |
 | `POST` | `/api/v1/properties/{id}/describe` | Regenerate description from reviewed amenities |
 | `GET` | `/api/v1/properties/` | List properties |
 | `GET` | `/api/v1/properties/{id}` | Get full property details |
 | `GET` | `/api/v1/properties/search` | Search by amenity names |
 | `GET` | `/api/v1/images/{id}` | Serve stored image bytes for thumbnails |
+| `PATCH` | `/api/v1/images/{id}` | Update `alt_text`, `caption`, `is_primary`, or `display_order` on an image |
 | `DELETE` | `/api/v1/properties/{id}` | Delete a property |
 | `GET` | `/api/v1/models/` | List available models |
 | `GET` | `/health` | Health check |
@@ -177,7 +195,7 @@ https://openrouter.ai/models.
 
 ### Example: Per-Image Flow
 
-Create a property:
+Create a property (minimal — only `name` and `model_name` are required):
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/properties/ \
@@ -189,6 +207,48 @@ curl -X POST http://localhost:8000/api/v1/properties/ \
   }'
 ```
 
+Or create one with full Phase 9 listing metadata:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/properties/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Frankfurt 3BHK",
+    "model_name": "openai/gpt-4o-mini",
+    "listing_type": "rent",
+    "price": 1500,
+    "currency": "EUR",
+    "price_period": "monthly",
+    "num_bedrooms": 3,
+    "num_bathrooms": 2,
+    "area_sqm": 82.5,
+    "property_type": "apartment",
+    "furnishing": "semi_furnished",
+    "available_from": "2026-06-01",
+    "locality": "Sachsenhausen",
+    "postal_code": "60594",
+    "country_code": "DE",
+    "owner_email": "owner@example.com"
+  }'
+```
+
+The response includes an auto-generated `slug` derived from the name plus the
+first six hex characters of the property UUID (e.g. `frankfurt-3bhk-d4e1f2`).
+The slug is immutable for the lifetime of the property so public URLs stay
+stable.
+
+Update listing metadata after creation:
+
+```bash
+curl -X PATCH http://localhost:8000/api/v1/properties/<property_id> \
+  -H "Content-Type: application/json" \
+  -d '{"price": 1450, "furnishing": "furnished"}'
+```
+
+Only fields present in the body are written; sending `null` clears a field;
+omitting a field leaves it untouched. The `slug` field is intentionally not
+patchable (sending it returns HTTP 422).
+
 Upload one image to the returned `property_id`:
 
 ```bash
@@ -196,6 +256,22 @@ curl -X POST http://localhost:8000/api/v1/properties/<property_id>/images \
   -F "model_name=openai/gpt-4o-mini" \
   -F "file=@/path/to/kitchen.jpg"
 ```
+
+The image response now also carries `alt_text` (8–20 word description for the
+HTML `alt` attribute, generated by the VLM), `caption` (short room caption,
+also from the VLM), `is_primary` (hero flag, default `false`), and
+`display_order` (gallery ordering, default `0`).
+
+Edit any of those image fields:
+
+```bash
+curl -X PATCH http://localhost:8000/api/v1/images/<image_id> \
+  -H "Content-Type: application/json" \
+  -d '{"alt_text": "Custom alt text", "is_primary": true}'
+```
+
+Setting `is_primary: true` automatically clears the flag on every other image
+of the same property — exactly one hero per property.
 
 Generate a description from reviewed amenities:
 
@@ -243,6 +319,49 @@ docker compose up -d --build ui
 
 Rebuilding only the API service does not update Gradio code because the UI runs
 in a separate container.
+
+## Database Migrations
+
+Schema changes go through Alembic. Two migrations are checked in today:
+
+- `0001_phase8_baseline` — captures the schema as it stood at the end of
+  Phase 8 (`properties`, `images`, `detected_amenities`).
+- `0002_phase9_listing_metadata` — adds the Phase 9 listing-metadata columns,
+  the four image SEO/ordering columns, a unique index on `slug`, and the
+  partial index `ix_detected_amenities_present_room_amenity` that powers the
+  Phase 11 search hot path.
+
+Apply on a fresh database:
+
+```bash
+docker compose exec api alembic upgrade head
+```
+
+> Inside the API container, `alembic`/`python`/`uvicorn` come from the runtime
+> venv on `PATH`. The `uv` binary itself is **only** present in the multi-stage
+> Dockerfile's builder stage and is not copied into the runtime image — call
+> `alembic` directly, not `uv run alembic`. Use `uv run alembic …` only when
+> running on the host machine.
+
+Apply on an existing PostgreSQL container that already had the Phase 8 schema
+created via `Base.metadata.create_all` (the live setup before Alembic was
+introduced) — stamp the baseline first so Alembic does not try to recreate
+the existing tables, then upgrade:
+
+```bash
+docker compose exec api alembic stamp 0001_phase8_baseline
+docker compose exec api alembic upgrade head
+```
+
+This is non-destructive: existing rows survive with `NULL` in the new
+property columns and the server defaults applied to `images.is_primary` and
+`images.display_order`.
+
+Roll back the most recent migration:
+
+```bash
+docker compose exec api alembic downgrade -1
+```
 
 ## Quality Checks
 
@@ -336,10 +455,11 @@ before reverting.
 ```text
 amenity_detector/
 ├── api/                         # FastAPI app, schemas, routers, middleware
-├── core/                        # Detection, preprocessing, orchestration, CRUD
-├── db/                          # SQLAlchemy models, sessions, migrations
+├── core/                        # Detection, preprocessing, orchestration, CRUD, slug helper
+├── db/                          # SQLAlchemy models, sessions, Alembic migrations
+│   └── migrations/versions/     # 0001_phase8_baseline.py, 0002_phase9_listing_metadata.py
 ├── models/                      # VLMClient interface + OpenRouter client
-├── ui/                          # Gradio frontend and review-state helpers
+├── ui/                          # Gradio frontend, listing-details accordion, review state
 ├── monitoring/                  # Prometheus and Grafana provisioning
 ├── docker/                      # API and UI Dockerfiles
 ├── tests/                       # Unit and integration tests
@@ -371,9 +491,19 @@ Completed:
 - Per-room amenity review UI.
 - Structured logging, Prometheus metrics, and Grafana dashboards.
 - OpenRouter migration and project cleanup.
+- **Phase 9 — listing-metadata expansion**: 17 nullable property columns
+  (price, rooms, area, locality, slug, …) + 4 image columns (alt_text,
+  caption, is_primary, display_order) + Alembic baseline and Phase 9
+  migrations + PATCH endpoints for property and image + UI listing-details
+  accordion + VLM-generated `alt_text` and `room_caption`.
 
 Next likely work:
 
+- Phase 10 — locality enrichment via OpenStreetMap Overpass + Nominatim
+  (auto-populated POI summary per property, cached 30 days).
+- Phase 11 — hybrid NL search: pgvector + Postgres full-text, LLM-driven
+  filter extraction over the Phase 9 metadata + per-room amenity tuples.
+- Phase 12 — `/public/*` SEO surface: server-rendered listing pages with
+  JSON-LD, sitemap.xml, robots.txt, llms.txt, JSONL feed for AI agents.
 - Cloud deployment target and managed database/storage.
 - Voice-assisted property search.
-- Richer property search and ranking.

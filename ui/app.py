@@ -189,6 +189,71 @@ def _expanded_hints_from_sequence(values: tuple[str | None, ...]) -> dict[str, b
     return hints_payload(dict(zip(HINT_KEYS, values, strict=False)))
 
 
+def _listing_metadata_payload(
+    listing_type: str | None,
+    price: float | int | None,
+    currency: str | None,
+    price_period: str | None,
+    property_type: str | None,
+    furnishing: str | None,
+    num_bedrooms: int | float | None,
+    num_bathrooms: int | float | None,
+    area_sqm: float | int | None,
+    available_from: str | None,
+    locality: str | None,
+    postal_code: str | None,
+    country_code: str | None,
+    owner_email: str | None,
+) -> dict[str, Any]:
+    """
+    Build the optional Phase 9 listing-metadata block for ``POST /api/v1/properties/``.
+
+    Drops any field the user did not actually fill in, so the API layer's
+    ``model_dump(exclude_unset=True)`` keeps the corresponding columns NULL.
+    Numeric ``0`` is treated as "unset" because Gradio's ``gr.Number`` returns
+    ``0`` when the field is left blank — passing literal ``0`` would force a
+    misleading row value on every upload.
+    """
+
+    out: dict[str, Any] = {}
+
+    def _put_str(key: str, value: str | None, *, upper: bool = False) -> None:
+        if value is None:
+            return
+        cleaned = value.strip()
+        if not cleaned:
+            return
+        out[key] = cleaned.upper() if upper else cleaned
+
+    def _put_choice(key: str, value: str | None) -> None:
+        # Gradio Dropdowns may emit None or the empty string for "no selection".
+        if value is None or value == "" or value == "—":
+            return
+        out[key] = value
+
+    def _put_number(key: str, value: int | float | None) -> None:
+        if value is None or value == 0:
+            return
+        out[key] = value
+
+    _put_choice("listing_type", listing_type)
+    _put_number("price", price)
+    _put_choice("currency", currency)
+    _put_choice("price_period", price_period)
+    _put_choice("property_type", property_type)
+    _put_choice("furnishing", furnishing)
+    _put_number("num_bedrooms", int(num_bedrooms) if num_bedrooms else None)
+    _put_number("num_bathrooms", int(num_bathrooms) if num_bathrooms else None)
+    _put_number("area_sqm", area_sqm)
+    _put_str("available_from", available_from)
+    _put_str("locality", locality)
+    _put_str("postal_code", postal_code)
+    _put_str("country_code", country_code, upper=True)
+    _put_str("owner_email", owner_email)
+
+    return out
+
+
 def _strip_warning_prefix(value: Any) -> str:
     """Remove UI-only warning markers before sending data back to the API."""
     return str(value).removeprefix(WARNING_PREFIX)
@@ -493,6 +558,7 @@ def upload_and_detect(
     balcony_hint: str | None,
     living_room_hint: str | None,
     expanded_hints: dict[str, bool] | None = None,
+    listing_metadata: dict[str, Any] | None = None,
     progress: gr.Progress = gr.Progress(),
 ):
     """
@@ -533,13 +599,16 @@ def upload_and_detect(
     seen_images: list[dict[str, Any]] = []
     property_id = ""
     try:
+        post_body: dict[str, Any] = {
+            "name": property_name.strip(),
+            "model_name": model_name,
+            "extra_info": extra_info.strip() or None,
+        }
+        if listing_metadata:
+            post_body.update(listing_metadata)
         response = requests.post(
             f"{_API_BASE_URL}/api/v1/properties/",
-            json={
-                "name": property_name.strip(),
-                "model_name": model_name,
-                "extra_info": extra_info.strip() or None,
-            },
+            json=post_body,
             timeout=30,
         )
         response.raise_for_status()
@@ -1307,6 +1376,84 @@ def build_app() -> gr.Blocks:
                     extra_info_input = gr.Textbox(
                         label="Additional Notes", lines=2, elem_id="additional-notes"
                     )
+
+                    # ── Phase 9: Listing details (optional, collapsed by default) ─
+                    # Every field is optional. Filled values are passed through to
+                    # POST /api/v1/properties/ alongside the existing name +
+                    # model_name + extra_info. Empty fields stay NULL on the row.
+                    with gr.Accordion("Listing details (optional)", open=False):
+                        with gr.Row():
+                            listing_type_input = gr.Dropdown(
+                                choices=["", "rent", "sale"],
+                                value="",
+                                label="Listing type",
+                            )
+                            property_type_input = gr.Dropdown(
+                                choices=["", "apartment", "house", "villa", "studio", "other"],
+                                value="",
+                                label="Property type",
+                            )
+                            furnishing_input = gr.Dropdown(
+                                choices=["", "furnished", "semi_furnished", "unfurnished"],
+                                value="",
+                                label="Furnishing",
+                            )
+                        with gr.Row():
+                            price_input = gr.Number(value=None, label="Price", precision=2)
+                            currency_input = gr.Dropdown(
+                                choices=["", "EUR", "USD", "GBP", "INR", "JPY", "CHF"],
+                                value="",
+                                label="Currency",
+                            )
+                            price_period_input = gr.Dropdown(
+                                choices=["", "monthly", "weekly", "nightly", "total"],
+                                value="",
+                                label="Price period",
+                            )
+                        with gr.Row():
+                            num_bedrooms_input = gr.Number(
+                                value=None, label="Bedrooms (BHK)", precision=0
+                            )
+                            num_bathrooms_input = gr.Number(
+                                value=None, label="Bathrooms", precision=0
+                            )
+                            area_sqm_input = gr.Number(value=None, label="Area (m²)", precision=2)
+                        with gr.Row():
+                            available_from_input = gr.Textbox(
+                                label="Available from (YYYY-MM-DD)", placeholder="2026-06-01"
+                            )
+                            owner_email_input = gr.Textbox(
+                                label="Owner email", placeholder="owner@example.com"
+                            )
+                        with gr.Row():
+                            locality_input = gr.Textbox(
+                                label="Locality / neighbourhood",
+                                placeholder="e.g. Sachsenhausen",
+                            )
+                            postal_code_input = gr.Textbox(
+                                label="Postal / ZIP code", placeholder="60594"
+                            )
+                            country_code_input = gr.Textbox(
+                                label="Country code (ISO 2)", placeholder="DE"
+                            )
+
+                    listing_metadata_inputs: list[Any] = [
+                        listing_type_input,
+                        price_input,
+                        currency_input,
+                        price_period_input,
+                        property_type_input,
+                        furnishing_input,
+                        num_bedrooms_input,
+                        num_bathrooms_input,
+                        area_sqm_input,
+                        available_from_input,
+                        locality_input,
+                        postal_code_input,
+                        country_code_input,
+                        owner_email_input,
+                    ]
+
                     num_rooms_input = gr.Slider(
                         minimum=0, maximum=6, step=1, value=0, label="Number of rooms"
                     )
@@ -1427,8 +1574,25 @@ def build_app() -> gr.Blocks:
                 state,
             )
 
+        # Layout for ``_upload_with_hints``:
+        #   values[0..7]   image_files, name, model, extra_info,
+        #                  num_rooms, kitchen_hint, balcony_hint, living_room_hint
+        #   values[8..21]  14 listing-metadata inputs (Phase 9)
+        #   values[22..]   expanded amenity hint textboxes
+        _LISTING_INPUT_OFFSET = 8
+        _LISTING_INPUT_COUNT = 14
+
         def _upload_with_hints(*values: Any):
-            hints = _expanded_hints_from_sequence(cast(tuple[str | None, ...], tuple(values[8:])))
+            listing_values = values[
+                _LISTING_INPUT_OFFSET : _LISTING_INPUT_OFFSET + _LISTING_INPUT_COUNT
+            ]
+            listing_metadata = _listing_metadata_payload(*listing_values)
+            hints = _expanded_hints_from_sequence(
+                cast(
+                    tuple[str | None, ...],
+                    tuple(values[_LISTING_INPUT_OFFSET + _LISTING_INPUT_COUNT :]),
+                )
+            )
             for step_html, status, state, description, next_upload_state in upload_and_detect(
                 values[0],
                 values[1],
@@ -1439,6 +1603,7 @@ def build_app() -> gr.Blocks:
                 values[6],
                 values[7],
                 hints,
+                listing_metadata,
             ):
                 if state and str(status).startswith("Detected "):
                     active = 3
@@ -1542,6 +1707,7 @@ def build_app() -> gr.Blocks:
                 model_dropdown,
                 extra_info_input,
                 *legacy_hint_inputs,
+                *listing_metadata_inputs,
                 *hint_textboxes,
             ],
             outputs=[

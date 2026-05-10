@@ -21,6 +21,7 @@ Design note:
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from PIL import Image as PILImage
 from PIL.Image import Image
@@ -29,6 +30,7 @@ from sqlalchemy.orm import Session
 from core.amenity_data_manager import AmenityDataManager
 from core.amenity_detector import AmenityDetector
 from core.amenity_schema import load_amenity_schema
+from core.slug import make_slug
 from db.models import Property, PropertyImage
 from models.base import VLMClient
 
@@ -84,18 +86,27 @@ class PropertyAmenitySystem:
         property_name: str,
         model_name: str,
         extra_info: str | None = None,
+        listing_metadata: dict[str, Any] | None = None,
     ) -> Property:
         """
         Create a Property row without running detection.
 
         Phase 5 uses this before uploading images one-by-one, which lets the UI
         show progress after each image instead of waiting for a whole batch.
+
+        Phase 9 adds optional ``listing_metadata`` (price, locality, rooms,
+        etc.) and auto-generates a stable slug once the row has its UUID.
         """
         prop = self.data_manager.create_property(
             name=property_name,
             model_used=model_name,
             extra_info=extra_info,
+            listing_metadata=listing_metadata,
         )
+        # Slug is derived from the name + the UUID we just got from the flush
+        # in create_property(). Storing it here means slugs are immutable for
+        # the lifetime of the property — exactly what stable public URLs need.
+        prop.slug = make_slug(prop.name, prop.id)
         self.data_manager.db.commit()
         self.data_manager.db.refresh(prop)
         (self.storage_dir / prop.id).mkdir(parents=True, exist_ok=True)
@@ -138,16 +149,24 @@ class PropertyAmenitySystem:
             room_type=None,
         )
 
-        amenities_by_room, flat_amenities, flat_confidences = self.detector.detect_from_image(image)
-        detected_room = _infer_room_type(amenities_by_room)
+        result = self.detector.detect_image_full(image)
+        detected_room = _infer_room_type(result.amenities_by_room)
         img_record.room_type = detected_room
+
+        # Phase 9: persist VLM-supplied SEO strings. ``alt_text`` is reused on
+        # public listing pages and JSON-LD; ``caption`` is shown under the
+        # image as a starting point the user can edit in the review UI.
+        if result.alt_text:
+            img_record.alt_text = result.alt_text
+        if result.room_caption:
+            img_record.caption = result.room_caption
 
         self.data_manager.save_amenities(
             property_id=property_id,
             image_id=img_record.id,
-            amenities=flat_amenities,
+            amenities=result.flat_amenities,
             room_type=detected_room,
-            confidences=flat_confidences,
+            confidences=result.flat_confidences,
         )
         self.data_manager.db.commit()
         self.data_manager.db.refresh(img_record)

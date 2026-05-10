@@ -17,9 +17,24 @@ Naming convention:
   - *Create    — what the client sends when creating a resource (input)
 """
 
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+# ── Phase 9 listing-metadata enum-like literals ──────────────────────────────
+# These are Pydantic Literals rather than DB-native ENUMs so the same schema
+# round-trips through SQLite (tests) and PostgreSQL (production) without a
+# dialect-specific ENUM type. Pydantic enforces the allowed value set at the
+# API boundary.
+
+ListingType = Literal["rent", "sale"]
+PricePeriod = Literal["monthly", "weekly", "nightly", "total"]
+PropertyType = Literal["apartment", "house", "villa", "studio", "other"]
+Furnishing = Literal["furnished", "semi_furnished", "unfurnished"]
+CountryCode = Annotated[str, StringConstraints(min_length=2, max_length=2, to_upper=True)]
+NonNegativeDecimal = Annotated[Decimal, Field(ge=Decimal("0"))]
 
 # ── Amenity schemas ──────────────────────────────────────────────────────────
 
@@ -56,13 +71,46 @@ class PropertyImageResponse(BaseModel):
     room_type: str | None
     amenities: list[DetectedAmenityResponse]
 
+    # Phase 9 SEO + ordering fields. alt_text is filled by the same VLM call
+    # that detects amenities; is_primary marks the hero image used in JSON-LD.
+    alt_text: str | None = None
+    caption: str | None = None
+    is_primary: bool = False
+    display_order: int = 0
+
     model_config = ConfigDict(from_attributes=True)
 
 
 # ── Property schemas ─────────────────────────────────────────────────────────
 
 
-class PropertySummaryResponse(BaseModel):
+class _PropertyMetadataMixin(BaseModel):
+    """Shared Phase 9 fields surfaced on both summary and detail responses.
+
+    Every field is optional so legacy rows (created before Phase 9) load with
+    ``None`` and the response stays valid.
+    """
+
+    slug: str | None = None
+    listing_type: ListingType | None = None
+    price: Decimal | None = None
+    currency: str | None = None
+    price_period: PricePeriod | None = None
+    num_bedrooms: int | None = None
+    num_bathrooms: int | None = None
+    area_sqm: Decimal | None = None
+    property_type: PropertyType | None = None
+    furnishing: Furnishing | None = None
+    available_from: date | None = None
+    locality: str | None = None
+    postal_code: str | None = None
+    country_code: str | None = None
+    latitude: Decimal | None = None
+    longitude: Decimal | None = None
+    owner_email: str | None = None
+
+
+class PropertySummaryResponse(_PropertyMetadataMixin):
     """
     Lightweight property representation for list endpoints.
 
@@ -82,7 +130,7 @@ class PropertySummaryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class PropertyDetailResponse(BaseModel):
+class PropertyDetailResponse(_PropertyMetadataMixin):
     """
     Full property details including all images and detected amenities.
 
@@ -107,12 +155,69 @@ class PropertyCreateRequest(BaseModel):
     """
     Request body for creating an empty property shell.
 
-    Used by the Phase 5 UI before uploading images one-by-one.
+    Used by the Phase 5 UI before uploading images one-by-one. Phase 9 added
+    the optional listing-metadata fields below; the API stays backward-compatible
+    with the original ``{name, model_name, extra_info}`` body.
     """
 
     name: str
     model_name: str
     extra_info: str | None = None
+
+    # Phase 9 listing metadata. All optional; ``None`` means "not provided" and
+    # the corresponding column stays NULL on the row.
+    listing_type: ListingType | None = None
+    price: NonNegativeDecimal | None = None
+    currency: str | None = None
+    price_period: PricePeriod | None = None
+    num_bedrooms: Annotated[int, Field(ge=0, le=50)] | None = None
+    num_bathrooms: Annotated[int, Field(ge=0, le=50)] | None = None
+    area_sqm: NonNegativeDecimal | None = None
+    property_type: PropertyType | None = None
+    furnishing: Furnishing | None = None
+    available_from: date | None = None
+    locality: str | None = None
+    postal_code: str | None = None
+    country_code: CountryCode | None = None
+    latitude: Annotated[Decimal, Field(ge=-90, le=90)] | None = None
+    longitude: Annotated[Decimal, Field(ge=-180, le=180)] | None = None
+    # ``owner_email`` is a single-tenant stub today (no auth). Stored as plain
+    # str rather than ``EmailStr`` to avoid pulling in the ``email-validator``
+    # dependency for what is currently a free-text contact field. When real
+    # auth lands in a later phase this will move onto a Users table.
+    owner_email: str | None = None
+
+
+class PropertyUpdateRequest(BaseModel):
+    """
+    Request body for PATCH /api/v1/properties/{id}.
+
+    Same field set as :class:`PropertyCreateRequest`'s metadata block, minus
+    ``name``, ``model_name``, ``extra_info`` (these are creation-time choices)
+    and ``slug`` (immutable post-creation to keep public URLs stable).
+
+    ``extra="forbid"`` rejects unknown keys with HTTP 422 — this is what
+    blocks attempts to PATCH ``slug``.
+    """
+
+    listing_type: ListingType | None = None
+    price: NonNegativeDecimal | None = None
+    currency: str | None = None
+    price_period: PricePeriod | None = None
+    num_bedrooms: Annotated[int, Field(ge=0, le=50)] | None = None
+    num_bathrooms: Annotated[int, Field(ge=0, le=50)] | None = None
+    area_sqm: NonNegativeDecimal | None = None
+    property_type: PropertyType | None = None
+    furnishing: Furnishing | None = None
+    available_from: date | None = None
+    locality: str | None = None
+    postal_code: str | None = None
+    country_code: CountryCode | None = None
+    latitude: Annotated[Decimal, Field(ge=-90, le=90)] | None = None
+    longitude: Annotated[Decimal, Field(ge=-180, le=180)] | None = None
+    owner_email: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class PropertyCreateResponse(BaseModel):
@@ -139,6 +244,27 @@ class HealthResponse(BaseModel):
     status: str
     database: str  # "ok" or "unreachable"
     version: str = "1.0.0"
+
+
+# ── Image patch schema ───────────────────────────────────────────────────────
+
+
+class ImageUpdateRequest(BaseModel):
+    """
+    Request body for PATCH /api/v1/images/{id}.
+
+    All fields are optional; only those actually present in the request are
+    written. Setting ``is_primary=True`` flips the hero flag on this image and
+    clears the flag on every other image in the same property (one hero per
+    property is the contract). ``extra="forbid"`` rejects unknown keys.
+    """
+
+    alt_text: str | None = None
+    caption: str | None = None
+    is_primary: bool | None = None
+    display_order: Annotated[int, Field(ge=0, le=999)] | None = None
+
+    model_config = ConfigDict(extra="forbid")
 
 
 # ── Describe endpoint schemas ─────────────────────────────────────────────────

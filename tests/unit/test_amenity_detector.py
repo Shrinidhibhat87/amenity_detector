@@ -373,3 +373,100 @@ class TestDetectFromImageStructuredJSON:
         assert set(amenities_by_room.keys()) == set(amenity_schema.keys())
         assert flat_amenities["refrigerator"] is True
         assert flat_confidences["bed"] == 0.0
+
+
+# ── Phase 9 alt_text + room_caption ─────────────────────────────────────────
+
+
+class TestPhase9AltTextAndCaption:
+    def test_prompt_requests_alt_text_and_room_caption(self, detector: AmenityDetector) -> None:
+        prompt = detector._build_detection_prompt(["refrigerator"])
+        # Both keys must be advertised in the prompt so the VLM emits them.
+        assert "alt_text" in prompt
+        assert "room_caption" in prompt
+
+    def test_detect_image_full_returns_alt_text_and_caption(
+        self,
+        detector: AmenityDetector,
+        fake_vlm: MagicMock,
+        small_image: PILImage.Image,
+    ) -> None:
+        fake_vlm.generate.return_value = VLMResponse(
+            raw_text=(
+                '{"room_type": "kitchen", '
+                '"alt_text": "Kitchen with stainless steel appliances and white cabinets", '
+                '"room_caption": "Bright open kitchen, ready for cooking", '
+                '"amenities": {"refrigerator": {"present": true, "confidence": 0.9}}}'
+            ),
+            model_name="fake-model",
+        )
+
+        result = detector.detect_image_full(small_image)
+
+        assert result.alt_text == "Kitchen with stainless steel appliances and white cabinets"
+        assert result.room_caption == "Bright open kitchen, ready for cooking"
+        assert result.flat_amenities["refrigerator"] is True
+
+    def test_detect_image_full_handles_missing_alt_text(
+        self,
+        detector: AmenityDetector,
+        fake_vlm: MagicMock,
+        small_image: PILImage.Image,
+    ) -> None:
+        # Older / smaller models may omit the new fields entirely.
+        fake_vlm.generate.return_value = VLMResponse(
+            raw_text=(
+                '{"room_type": "kitchen", '
+                '"amenities": {"refrigerator": {"present": true, "confidence": 0.9}}}'
+            ),
+            model_name="fake-model",
+        )
+
+        result = detector.detect_image_full(small_image)
+
+        assert result.alt_text is None
+        assert result.room_caption is None
+        # Existing fields still populated.
+        assert result.flat_amenities["refrigerator"] is True
+
+    def test_detect_image_full_clamps_alt_text_length(
+        self,
+        detector: AmenityDetector,
+        fake_vlm: MagicMock,
+        small_image: PILImage.Image,
+    ) -> None:
+        # alt_text is stored in a 500-char column. If the VLM rambles, we trim
+        # rather than dropping the field entirely.
+        long_alt = "Kitchen " + ("with chrome fixtures " * 200)
+        fake_vlm.generate.return_value = VLMResponse(
+            raw_text=(f'{{"room_type": "kitchen", "alt_text": "{long_alt}", "amenities": {{}}}}'),
+            model_name="fake-model",
+        )
+
+        result = detector.detect_image_full(small_image)
+        assert result.alt_text is not None
+        assert len(result.alt_text) <= 500
+
+    def test_detect_from_image_still_returns_three_tuple(
+        self,
+        detector: AmenityDetector,
+        fake_vlm: MagicMock,
+        small_image: PILImage.Image,
+    ) -> None:
+        # Backward compatibility: the existing 3-tuple API must keep working
+        # so legacy callers and tests don't have to change.
+        fake_vlm.generate.return_value = VLMResponse(
+            raw_text=(
+                '{"room_type": "kitchen", '
+                '"alt_text": "Kitchen", '
+                '"amenities": {"refrigerator": true}}'
+            ),
+            model_name="fake-model",
+        )
+
+        result = detector.detect_from_image(small_image)
+        assert len(result) == 3
+        amenities_by_room, flat_amenities, flat_confidences = result
+        assert flat_amenities["refrigerator"] is True
+        assert "kitchen" in amenities_by_room
+        assert flat_confidences  # at least one entry

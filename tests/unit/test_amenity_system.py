@@ -195,6 +195,80 @@ class TestProcessOneImage:
         expected_path = tmp_path / "images" / prop.id / "bedroom.jpg"
         assert expected_path.exists()
 
+    def test_persists_alt_text_and_caption_from_vlm(
+        self,
+        in_memory_db: Session,
+        small_image: PILImage.Image,
+        tmp_path: Path,
+    ) -> None:
+        """Phase 9: VLM-supplied alt_text/room_caption land on PropertyImage."""
+        canned = json.dumps(
+            {
+                "room_type": "kitchen",
+                "alt_text": "Spacious kitchen with stainless steel appliances",
+                "room_caption": "Modern kitchen ready for cooking",
+                "amenities": {
+                    "refrigerator": {"present": True, "confidence": 0.9},
+                },
+            }
+        )
+        vlm = MagicMock(spec=VLMClient)
+        type(vlm).model_name = property(lambda self: "fake-model")
+        vlm.generate.return_value = VLMResponse(raw_text=canned, model_name="fake-model")
+
+        system = PropertyAmenitySystem(
+            vlm_client=vlm,
+            db=in_memory_db,
+            image_storage_dir=tmp_path / "images",
+        )
+        prop = system.create_property_shell(
+            property_name="Alt Text Test",
+            model_name="fake-model",
+        )
+        img = system.process_one_image(
+            property_id=prop.id,
+            image=small_image,
+            filename="kitchen.jpg",
+        )
+
+        assert img.alt_text == "Spacious kitchen with stainless steel appliances"
+        assert img.caption == "Modern kitchen ready for cooking"
+
+    def test_alt_text_absent_keeps_columns_null(
+        self,
+        in_memory_db: Session,
+        small_image: PILImage.Image,
+        tmp_path: Path,
+    ) -> None:
+        """A VLM that omits the new fields leaves the columns NULL."""
+        canned = json.dumps(
+            {
+                "room_type": "bedroom",
+                "amenities": {"bed": {"present": True, "confidence": 0.9}},
+            }
+        )
+        vlm = MagicMock(spec=VLMClient)
+        type(vlm).model_name = property(lambda self: "fake-model")
+        vlm.generate.return_value = VLMResponse(raw_text=canned, model_name="fake-model")
+
+        system = PropertyAmenitySystem(
+            vlm_client=vlm,
+            db=in_memory_db,
+            image_storage_dir=tmp_path / "images",
+        )
+        prop = system.create_property_shell(
+            property_name="No Alt Text",
+            model_name="fake-model",
+        )
+        img = system.process_one_image(
+            property_id=prop.id,
+            image=small_image,
+            filename="bedroom.jpg",
+        )
+
+        assert img.alt_text is None
+        assert img.caption is None
+
     def test_creates_amenity_records(
         self,
         system: PropertyAmenitySystem,
