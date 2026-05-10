@@ -17,6 +17,7 @@ Usage pattern in FastAPI:
 """
 
 import logging
+from typing import Any
 
 from sqlalchemy import and_, exists, select
 from sqlalchemy.orm import Session
@@ -52,6 +53,7 @@ class AmenityDataManager:
         name: str,
         model_used: str | None = None,
         extra_info: str | None = None,
+        listing_metadata: dict[str, Any] | None = None,
     ) -> Property:
         """
         Insert a new Property row and return it.
@@ -59,17 +61,53 @@ class AmenityDataManager:
         The description is not set here — it's filled in after the VLM runs.
 
         Args:
-            name:       Human-readable label for this property.
-            model_used: The VLM that will process this property (e.g., "openai/gpt-4o-mini").
-            extra_info: Free-text notes from the user (location, number of rooms, etc.)
+            name:             Human-readable label for this property.
+            model_used:       The VLM that will process this property
+                              (e.g., "openai/gpt-4o-mini").
+            extra_info:       Free-text notes from the user.
+            listing_metadata: Optional dict of Phase 9 listing fields
+                              (price, num_bedrooms, locality, ...). Only keys
+                              present in the dict are applied; ``None`` values
+                              are written through (so callers can clear fields).
 
         Returns:
             The newly created Property ORM object (not yet committed).
         """
         prop = Property(name=name, model_used=model_used, extra_info=extra_info)
+        if listing_metadata:
+            for key, value in listing_metadata.items():
+                setattr(prop, key, value)
         self.db.add(prop)
         self.db.flush()  # Assign the UUID without a full commit — we still need to add images
         self.logger.info("Created property id=%s name=%r", prop.id, prop.name)
+        return prop
+
+    def update_property(
+        self,
+        property_id: str,
+        fields: dict[str, Any],
+    ) -> Property | None:
+        """
+        Patch an existing property with the supplied fields and return it.
+
+        Only keys present in ``fields`` are written; this gives the API caller
+        explicit control between "leave alone" (omit the key) and "clear"
+        (pass ``None``). The caller is responsible for committing.
+
+        Args:
+            property_id: UUID of the property to update.
+            fields:      Dict of column-name → new value.
+
+        Returns:
+            The updated Property, or ``None`` if no row matched.
+        """
+        prop = self.db.get(Property, property_id)
+        if prop is None:
+            return None
+        for key, value in fields.items():
+            setattr(prop, key, value)
+        self.db.flush()
+        self.logger.info("Patched property id=%s fields=%s", property_id, sorted(fields.keys()))
         return prop
 
     def save_image(
@@ -150,6 +188,48 @@ class AmenityDataManager:
 
         self.logger.info("Saved %d amenity records for image_id=%s", len(records), image_id)
         return records
+
+    def update_image(
+        self,
+        image_id: str,
+        fields: dict[str, Any],
+    ) -> PropertyImage | None:
+        """
+        Patch a ``PropertyImage`` with the supplied fields and return it.
+
+        When ``is_primary=True`` is in ``fields``, the flag is cleared on every
+        other image belonging to the same property in the same transaction —
+        the public listing page picks exactly one hero image.
+
+        Args:
+            image_id: UUID of the image to update.
+            fields:   Dict of column-name → new value.
+
+        Returns:
+            The updated PropertyImage, or ``None`` when no row matches.
+        """
+        img = self.db.get(PropertyImage, image_id)
+        if img is None:
+            return None
+
+        if fields.get("is_primary") is True:
+            siblings = (
+                self.db.query(PropertyImage)
+                .filter(
+                    PropertyImage.property_id == img.property_id,
+                    PropertyImage.id != image_id,
+                    PropertyImage.is_primary.is_(True),
+                )
+                .all()
+            )
+            for sibling in siblings:
+                sibling.is_primary = False
+
+        for key, value in fields.items():
+            setattr(img, key, value)
+        self.db.flush()
+        self.logger.info("Patched image id=%s fields=%s", image_id, sorted(fields.keys()))
+        return img
 
     def update_property_description(self, property_id: str, description: str) -> Property:
         """

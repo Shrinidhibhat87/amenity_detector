@@ -19,11 +19,62 @@ Why prompt engineering matters here:
 import json
 import logging
 import re
+from dataclasses import dataclass
 
 from PIL.Image import Image
 
 from core.preprocessing import preprocess_image
 from models.base import VLMClient
+
+# Maximum length we persist for VLM-generated image strings. The DB columns
+# ``images.alt_text`` and ``images.caption`` are both VARCHAR(500); we trim
+# rather than drop the field if a verbose model overruns.
+_ALT_TEXT_MAX_CHARS = 500
+_ROOM_CAPTION_MAX_CHARS = 500
+
+
+@dataclass(frozen=True)
+class DetectionResult:
+    """Rich result from a single VLM detection call.
+
+    The tuple-returning :meth:`AmenityDetector.detect_from_image` exists for
+    backward compatibility with Phase 5 callers; new code should prefer this
+    dataclass via :meth:`AmenityDetector.detect_image_full`.
+
+    Attributes:
+        amenities_by_room: Same shape as the existing 3-tuple's first element.
+        flat_amenities:    Same shape as the existing 3-tuple's second element.
+        flat_confidences:  Same shape as the existing 3-tuple's third element.
+        alt_text:          Short SEO-friendly description of the image suitable
+                           for the HTML ``alt`` attribute. Phase 12 uses this
+                           in JSON-LD and on listing pages. ``None`` when the
+                           VLM did not emit it.
+        room_caption:      One-sentence flavour caption for the room. Stored
+                           on ``PropertyImage.caption`` as a starting point
+                           the user can later edit. ``None`` when omitted.
+    """
+
+    amenities_by_room: dict[str, dict[str, bool]]
+    flat_amenities: dict[str, bool]
+    flat_confidences: dict[str, float]
+    alt_text: str | None
+    room_caption: str | None
+
+
+def _trim_to_length(value: str | None, max_chars: int) -> str | None:
+    """Trim a string to ``max_chars``, preferring a word boundary."""
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) <= max_chars:
+        return cleaned
+    truncated = cleaned[:max_chars]
+    last_space = truncated.rfind(" ")
+    if last_space > max_chars - 50:  # don't truncate too aggressively
+        truncated = truncated[:last_space]
+    return truncated.rstrip()
 
 
 class AmenityDetector:
@@ -73,11 +124,16 @@ class AmenityDetector:
         return (
             "You are analysing one property photo. Identify the most likely room type "
             "(for example kitchen, bedroom, bathroom, living_room, balcony, dining_room, "
-            "or unknown), then check which listed amenities are visible.\n\n"
+            "or unknown), then check which listed amenities are visible. You also "
+            "produce a short ``alt_text`` (for the HTML alt attribute, screen readers, "
+            "and search engines) and a one-sentence ``room_caption`` describing the "
+            "feel of the room.\n\n"
             f"Amenities to check: {amenity_list}\n\n"
             "Respond ONLY with one JSON object using this exact shape:\n"
             "{\n"
             '  "room_type": "kitchen",\n'
+            '  "alt_text": "Kitchen with stainless steel appliances and white cabinets",\n'
+            '  "room_caption": "Bright open kitchen ready for cooking",\n'
             '  "amenities": {\n'
             '    "refrigerator": {"present": true, "confidence": 0.95},\n'
             '    "oven": {"present": false, "confidence": 0.10}\n'
@@ -87,7 +143,9 @@ class AmenityDetector:
             "- Use amenity names exactly as listed above.\n"
             "- Set present=true only when the amenity is clearly visible.\n"
             "- Confidence must be a number from 0.0 to 1.0.\n"
-            "- Do not add commentary, markdown, or keys outside room_type and amenities.\n\n"
+            "- alt_text: 8 to 20 words describing what is visible, no marketing fluff.\n"
+            "- room_caption: a single short sentence in plain English.\n"
+            "- Do not add markdown, commentary, or keys outside the four shown above.\n\n"
             "JSON response:"
         )
 
@@ -259,22 +317,51 @@ class AmenityDetector:
     def _parse_detection_response(
         self, text: str
     ) -> tuple[str | None, dict[str, tuple[bool, float]]]:
+        """Parse the Phase 5 detection response (room_type + amenities only).
+
+        Phase 9 added ``alt_text`` and ``room_caption`` to the response shape;
+        callers that need those should use :meth:`_parse_detection_response_full`
+        instead. This method stays narrow so existing tests keep passing.
         """
-        Parse the preferred Phase 5 detection response.
+        room_type, parsed, _alt, _caption = self._parse_detection_response_full(text)
+        return room_type, parsed
 
-        The preferred shape is:
-            {"room_type": "kitchen", "amenities": {"oven": {"present": true, ...}}}
+    def _parse_detection_response_full(
+        self, text: str
+    ) -> tuple[str | None, dict[str, tuple[bool, float]], str | None, str | None]:
+        """Parse the Phase 9 detection response.
 
-        For compatibility with existing tests and less obedient models, the older
-        flat amenity object is still accepted and returns room_type=None.
+        Preferred shape:
+
+            {
+              "room_type": "kitchen",
+              "alt_text": "...",
+              "room_caption": "...",
+              "amenities": {"oven": {"present": true, ...}}
+            }
+
+        For compatibility with older / smaller models, missing fields are
+        returned as ``None`` and the older flat amenity object is still
+        accepted (with ``room_type``/``alt_text``/``room_caption`` all None).
         """
         raw = self._parse_raw_json_object(text)
         if raw is None:
-            return None, {}
+            return None, {}, None, None
 
-        room_type = raw.get("room_type")
+        room_value = raw.get("room_type")
         parsed_room = (
-            str(room_type).strip() if isinstance(room_type, str) and room_type.strip() else None
+            str(room_value).strip() if isinstance(room_value, str) and room_value.strip() else None
+        )
+
+        raw_alt = raw.get("alt_text")
+        alt_text = _trim_to_length(
+            raw_alt if isinstance(raw_alt, str) else None,
+            _ALT_TEXT_MAX_CHARS,
+        )
+        raw_caption = raw.get("room_caption")
+        room_caption = _trim_to_length(
+            raw_caption if isinstance(raw_caption, str) else None,
+            _ROOM_CAPTION_MAX_CHARS,
         )
 
         amenities_obj = raw.get("amenities")
@@ -282,68 +369,49 @@ class AmenityDetector:
             parsed = {
                 key: self._parse_amenity_entry(key, val) for key, val in amenities_obj.items()
             }
-            return parsed_room, parsed
+            return parsed_room, parsed, alt_text, room_caption
 
+        # Legacy flat shape: every key in the object is an amenity entry.
         parsed = {key: self._parse_amenity_entry(key, val) for key, val in raw.items()}
-        return None, parsed
+        return None, parsed, None, None
 
-    def detect_from_image(
-        self, image: Image
-    ) -> tuple[dict[str, dict[str, bool]], dict[str, bool], dict[str, float]]:
+    def detect_image_full(self, image: Image) -> DetectionResult:
         """
-        Run amenity detection on a PIL Image.
+        Run a single VLM detection call and return the full Phase 9 result.
 
-        This is the primary detection method used by the API. It:
-          1. Builds a prompt listing all amenities from the schema
-          2. Calls the VLM and handles timeout / connection errors gracefully
-          3. Parses the JSON response (supports both new structured and legacy boolean formats)
-          4. Organises results by room type (for the DB) and as flat dicts
+        The VLM is asked once per image for room type, per-amenity
+        present/confidence, alt text, and a short caption. Failures are
+        swallowed and reported as an empty result so a single bad image
+        cannot abort the whole upload pipeline.
 
         Args:
             image: A PIL Image of the room to analyse.
 
         Returns:
-            Tuple of three dicts:
-
-            amenities_by_room: {room_type: {amenity_name: bool}}
-                Used to infer the room type and structure DB records.
-                e.g. {"kitchen": {"refrigerator": True, "oven": False}, ...}
-
-            flat_amenities: {amenity_name: bool}
-                Convenience dict of all detected amenities across all rooms.
-                e.g. {"refrigerator": True, "oven": False, "bed": False, ...}
-
-            flat_confidences: {amenity_name: float}
-                Model confidence per amenity (0.0 = not sure, 1.0 = certain).
-                e.g. {"refrigerator": 0.95, "oven": 0.1, ...}
-
-            On VLM error, all three dicts are empty rather than raising an exception,
-            so a single bad image does not abort the whole upload pipeline.
+            A :class:`DetectionResult` with all four data fields populated.
+            On VLM error, every field is empty / ``None``.
         """
-        # Flatten and deduplicate all amenity names across all room types
         all_amenities = sorted(
             {amenity for amenities in self.amenity_schema.values() for amenity in amenities}
         )
-
         prompt = self._build_detection_prompt(all_amenities)
 
-        # Call the VLM — catch RuntimeError (connection/timeout/HTTP errors from clients)
         processed = preprocess_image(image)
         try:
             response = self.client.generate(processed, prompt)
-            detected_room, parsed = self._parse_detection_response(response.raw_text)
+            detected_room, parsed, alt_text, room_caption = self._parse_detection_response_full(
+                response.raw_text
+            )
         except RuntimeError as e:
             self.logger.error("VLM detection failed: %s", e)
             detected_room = None
             parsed = {}
+            alt_text = None
+            room_caption = None
 
-        # Split the parsed dict into separate bool and float dicts for clarity
         flat_amenities: dict[str, bool] = {k: v[0] for k, v in parsed.items()}
         flat_confidences: dict[str, float] = {k: v[1] for k, v in parsed.items()}
 
-        # Prefer the room label supplied by the Phase 5 structured response. For
-        # legacy flat responses, keep the older schema-wide structure so callers
-        # can still infer a room by counting present amenities.
         amenities_by_room: dict[str, dict[str, bool]] = {}
         if detected_room:
             amenities_by_room[detected_room] = dict(flat_amenities)
@@ -353,7 +421,30 @@ class AmenityDetector:
                     amenity: flat_amenities.get(amenity, False) for amenity in amenity_list
                 }
 
-        return amenities_by_room, flat_amenities, flat_confidences
+        return DetectionResult(
+            amenities_by_room=amenities_by_room,
+            flat_amenities=flat_amenities,
+            flat_confidences=flat_confidences,
+            alt_text=alt_text,
+            room_caption=room_caption,
+        )
+
+    def detect_from_image(
+        self, image: Image
+    ) -> tuple[dict[str, dict[str, bool]], dict[str, bool], dict[str, float]]:
+        """
+        Run amenity detection and return the legacy 3-tuple result.
+
+        Backward-compatible shim around :meth:`detect_image_full` for callers
+        that don't need the Phase 9 ``alt_text`` and ``room_caption`` fields.
+        New code should call :meth:`detect_image_full` directly.
+
+        Returns:
+            ``(amenities_by_room, flat_amenities, flat_confidences)``.
+            On VLM error all three dicts are empty / zero rather than raising.
+        """
+        result = self.detect_image_full(image)
+        return result.amenities_by_room, result.flat_amenities, result.flat_confidences
 
     def generate_description(self, image: Image, detected_amenities: dict[str, bool]) -> str:
         """
