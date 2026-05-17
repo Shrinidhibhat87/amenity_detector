@@ -112,8 +112,8 @@ _default_origins = [
     "http://localhost:7860",  # Gradio (host)
     "http://localhost:3001",  # Next.js web (host)
     "http://localhost:8000",  # API self / Swagger
-    "http://web:3000",        # Next.js web (internal Docker DNS)
-    "http://ui:7860",         # Gradio (internal Docker DNS)
+    "http://web:3000",  # Next.js web (internal Docker DNS)
+    "http://ui:7860",  # Gradio (internal Docker DNS)
 ]
 _cors_env = os.getenv("CORS_ORIGINS", "").strip()
 _cors_origins = (
