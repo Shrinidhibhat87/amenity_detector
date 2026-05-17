@@ -1,5 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, getImageUrl, getProperty, listProperties } from '../../lib/api';
+import {
+  ApiError,
+  createProperty,
+  describeProperty,
+  getImageUrl,
+  getProperty,
+  listModels,
+  listProperties,
+  patchImage,
+  patchProperty,
+  uploadImage,
+} from '../../lib/api';
 
 // jsdom has `window`, so getBaseUrl() branches to NEXT_PUBLIC_API_BASE_URL.
 const BASE = 'http://test-api:8000';
@@ -144,5 +155,131 @@ describe('getProperty', () => {
   it('ApiError on 404 has status 404', async () => {
     mockFetch.mockResolvedValueOnce(errResponse(404));
     await expect(getProperty('missing')).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+// ── Mutations ──────────────────────────────────────────────────────────────────
+
+describe('listModels', () => {
+  it('parses ModelInfo array', async () => {
+    mockFetch.mockResolvedValueOnce(
+      okResponse([{ name: 'gpt-4o-mini', available: true, description: 'GPT' }]),
+    );
+    const models = await listModels();
+    expect(models[0]?.name).toBe('gpt-4o-mini');
+    expect(models[0]?.available).toBe(true);
+  });
+});
+
+describe('createProperty', () => {
+  const minDetail = { ...minSummary, images: [] };
+
+  it('POSTs JSON body and parses response', async () => {
+    mockFetch.mockResolvedValueOnce(
+      okResponse({ property_id: 'p-9', message: 'created', property: minDetail }),
+    );
+    const res = await createProperty({ name: 'X', model_name: 'gpt-4o-mini' });
+    expect(res.property_id).toBe('p-9');
+
+    const init = (mockFetch.mock.calls[0] as [string, RequestInit])[1];
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe(JSON.stringify({ name: 'X', model_name: 'gpt-4o-mini' }));
+  });
+
+  it('hits /api/v1/properties/', async () => {
+    mockFetch.mockResolvedValueOnce(
+      okResponse({ property_id: 'p', message: '', property: minDetail }),
+    );
+    await createProperty({ name: 'X', model_name: 'gpt' });
+    const url = (mockFetch.mock.calls[0] as [string])[0];
+    expect(url).toBe(`${BASE}/api/v1/properties/`);
+  });
+});
+
+describe('uploadImage', () => {
+  const minImage = {
+    id: 'img-1',
+    file_path: '/storage/img-1.jpg',
+    room_type: 'kitchen',
+    amenities: [],
+    alt_text: null,
+    caption: null,
+    is_primary: false,
+    display_order: 0,
+  };
+
+  it('POSTs multipart FormData (no Content-Type header)', async () => {
+    mockFetch.mockResolvedValueOnce(
+      okResponse({ property_id: 'p-1', image: minImage }),
+    );
+    const file = new File(['data'], 'photo.jpg', { type: 'image/jpeg' });
+    await uploadImage({ propertyId: 'p-1', file, modelName: 'gpt-4o-mini' });
+
+    const init = (mockFetch.mock.calls[0] as [string, RequestInit])[1];
+    expect(init.method).toBe('POST');
+    expect(init.body).toBeInstanceOf(FormData);
+    // Crucial: must NOT set Content-Type — the browser fills boundary itself.
+    expect(init.headers).toBeUndefined();
+  });
+
+  it('forwards an AbortSignal when provided', async () => {
+    mockFetch.mockResolvedValueOnce(
+      okResponse({ property_id: 'p-1', image: minImage }),
+    );
+    const ctrl = new AbortController();
+    const file = new File(['x'], 'a.jpg', { type: 'image/jpeg' });
+    await uploadImage({ propertyId: 'p-1', file, modelName: 'gpt', signal: ctrl.signal });
+
+    const init = (mockFetch.mock.calls[0] as [string, RequestInit])[1];
+    expect(init.signal).toBe(ctrl.signal);
+  });
+});
+
+describe('patchImage', () => {
+  const minImage = {
+    id: 'img-1',
+    file_path: '/storage/img-1.jpg',
+    room_type: null,
+    amenities: [],
+    alt_text: null,
+    caption: null,
+    is_primary: true,
+    display_order: 0,
+  };
+
+  it('sends PATCH with JSON body', async () => {
+    mockFetch.mockResolvedValueOnce(okResponse(minImage));
+    await patchImage('p-1', 'img-1', { is_primary: true, alt_text: 'kitchen' });
+
+    const init = (mockFetch.mock.calls[0] as [string, RequestInit])[1];
+    expect(init.method).toBe('PATCH');
+    expect(init.body).toBe(JSON.stringify({ is_primary: true, alt_text: 'kitchen' }));
+  });
+});
+
+describe('describeProperty', () => {
+  it('POSTs to /describe and parses { description }', async () => {
+    mockFetch.mockResolvedValueOnce(okResponse({ description: 'Lovely place.' }));
+    const res = await describeProperty('p-1', {
+      amenities: [{ amenity_name: 'WiFi', room_type: 'living_room', is_present: true }],
+      model_name: 'gpt',
+    });
+    expect(res.description).toBe('Lovely place.');
+    const url = (mockFetch.mock.calls[0] as [string])[0];
+    expect(url).toBe(`${BASE}/api/v1/properties/p-1/describe`);
+  });
+});
+
+describe('patchProperty', () => {
+  const minDetail = { ...minSummary, images: [] };
+
+  it('accepts description in patch body', async () => {
+    mockFetch.mockResolvedValueOnce(okResponse({ ...minDetail, description: 'Updated' }));
+    const res = await patchProperty('p-1', { description: 'Updated' });
+    expect(res.description).toBe('Updated');
+
+    const init = (mockFetch.mock.calls[0] as [string, RequestInit])[1];
+    expect(init.method).toBe('PATCH');
+    expect(init.body).toBe(JSON.stringify({ description: 'Updated' }));
   });
 });

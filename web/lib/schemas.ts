@@ -143,7 +143,14 @@ export const PropertyCreateRequest = z.object({
 });
 export type PropertyCreateRequest = z.infer<typeof PropertyCreateRequest>;
 
-export const PropertyUpdateRequest = z.object(_listingFields).strict();
+export const PropertyUpdateRequest = z
+  .object({
+    ..._listingFields,
+    // The wizard PATCHes the generated description here after the describe
+    // step. Backend mirrors this field on api/schemas.py PropertyUpdateRequest.
+    description: z.string().optional(),
+  })
+  .strict();
 export type PropertyUpdateRequest = z.infer<typeof PropertyUpdateRequest>;
 
 // ── Image PATCH body ─────────────────────────────────────────────────────────
@@ -178,6 +185,32 @@ export type DescribeRequest = z.infer<typeof DescribeRequest>;
 
 export const DescribeResponse = z.object({ description: z.string() });
 export type DescribeResponse = z.infer<typeof DescribeResponse>;
+
+// ── Mutation response wrappers ───────────────────────────────────────────────
+// These mirror api/schemas.py PropertyCreateResponse and ImageDetectionResponse.
+
+export const PropertyCreateResponse = z.object({
+  property_id: z.string(),
+  message: z.string(),
+  property: PropertyDetail,
+});
+export type PropertyCreateResponse = z.infer<typeof PropertyCreateResponse>;
+
+export const ImageDetectionResponse = z.object({
+  property_id: z.string(),
+  image: PropertyImage,
+});
+export type ImageDetectionResponse = z.infer<typeof ImageDetectionResponse>;
+
+// ── Model registry info ──────────────────────────────────────────────────────
+// Returned by GET /api/v1/models/ — feeds the wizard's model dropdown.
+
+export const ModelInfo = z.object({
+  name: z.string(),
+  available: z.boolean(),
+  description: z.string(),
+});
+export type ModelInfo = z.infer<typeof ModelInfo>;
 
 // ── Health check ─────────────────────────────────────────────────────────────
 export const Health = z.object({
