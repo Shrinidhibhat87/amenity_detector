@@ -3,6 +3,11 @@ import { listProperties } from '@/lib/api';
 import { PropertyCard } from '@/components/property-card';
 import type { PropertySummary } from '@/lib/schemas';
 
+// Skip build-time prerender — the API isn't reachable during `docker build`.
+// Even though the try/catch below handles fetch failures gracefully, marking
+// this dynamic also keeps the "featured" section fresh on every visit.
+export const dynamic = 'force-dynamic';
+
 export default async function Home() {
   // Fetch the three most recent listings for the featured section.
   // If the API is down during dev/build, degrade gracefully to empty list.

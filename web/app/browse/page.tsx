@@ -2,6 +2,11 @@ import type { Metadata } from 'next';
 import { listProperties } from '@/lib/api';
 import { PropertyCard } from '@/components/property-card';
 
+// Skip build-time prerender — the API isn't reachable during `docker build`.
+// This page renders on every request (SSR). Acceptable: the listing index
+// must reflect current state, and the API call is fast.
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: 'Browse Properties — Amenity Detector',
   description: 'Browse all available property listings with detected amenities.',
