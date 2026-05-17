@@ -107,6 +107,9 @@ services:
       API_BASE_URL: http://api:8000
       # Exposed to the browser via Next.js public env. The browser hits the host port.
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      # Canonical origin for SEO URLs (sitemap, robots, JSON-LD). Override in
+      # production with the real public domain (e.g. https://amenity.example.com).
+      NEXT_PUBLIC_SITE_URL: http://localhost:3001
     depends_on:
       api:
         condition: service_healthy
