@@ -3,7 +3,8 @@
 # Services defined here:
 #   db         — PostgreSQL 16 database
 #   api        — FastAPI backend (port 8000)
-#   ui         — Gradio frontend (port 7860)        — Phase 3
+#   ui         — Gradio frontend (port 7860)        — Phase 3 (kept until web reaches parity)
+#   web        — Next.js TypeScript frontend (port 3001) — Phase A foundation
 #   prometheus — Metrics scraper (port 9090)         — Phase 4
 #   grafana    — Dashboards for Prometheus (port 3000) — Phase 4
 #
@@ -87,6 +88,30 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:7860/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Next.js TypeScript frontend (replaces Gradio once feature-parity is reached) ──
+  # Runs the standalone Next.js server. Host port 3001 is used because Grafana
+  # claims 3000. The web container itself listens on 3000 internally.
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      # Internal Docker DNS — the web container reaches the API via the service name.
+      API_BASE_URL: http://api:8000
+      # Exposed to the browser via Next.js public env. The browser hits the host port.
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/ || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
