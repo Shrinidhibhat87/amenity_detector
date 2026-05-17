@@ -20,23 +20,26 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 
 // ── Domain types ──────────────────────────────────────────────────────────────
 
+// `field?: T | undefined` (not `field?: T`) is required by exactOptionalPropertyTypes.
+// Setters need to write `undefined` explicitly to clear a value; the bare `?`
+// form would forbid that under the strict tsconfig.
 export interface ConfigInput {
   name: string;
   model_name: string;
   // Optional Phase 9 listing metadata
-  listing_type?: 'rent' | 'sale';
-  price?: number;
-  currency?: string;
-  price_period?: 'monthly' | 'weekly' | 'nightly' | 'total';
-  num_bedrooms?: number;
-  num_bathrooms?: number;
-  area_sqm?: number;
-  property_type?: 'apartment' | 'house' | 'villa' | 'studio' | 'other';
-  furnishing?: 'furnished' | 'semi_furnished' | 'unfurnished';
-  available_from?: string;
-  locality?: string;
-  postal_code?: string;
-  country_code?: string;
+  listing_type?: 'rent' | 'sale' | undefined;
+  price?: number | undefined;
+  currency?: string | undefined;
+  price_period?: 'monthly' | 'weekly' | 'nightly' | 'total' | undefined;
+  num_bedrooms?: number | undefined;
+  num_bathrooms?: number | undefined;
+  area_sqm?: number | undefined;
+  property_type?: 'apartment' | 'house' | 'villa' | 'studio' | 'other' | undefined;
+  furnishing?: 'furnished' | 'semi_furnished' | 'unfurnished' | undefined;
+  available_from?: string | undefined;
+  locality?: string | undefined;
+  postal_code?: string | undefined;
+  country_code?: string | undefined;
 }
 
 export interface AmenityItem {
