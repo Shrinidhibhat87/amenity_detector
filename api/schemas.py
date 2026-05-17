@@ -216,6 +216,9 @@ class PropertyUpdateRequest(BaseModel):
     latitude: Annotated[Decimal, Field(ge=-90, le=90)] | None = None
     longitude: Annotated[Decimal, Field(ge=-180, le=180)] | None = None
     owner_email: str | None = None
+    # The wizard's describe step calls POST /describe to generate text, then
+    # PATCHes that text back here to persist it on the property row.
+    description: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
