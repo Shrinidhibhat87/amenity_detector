@@ -1,0 +1,84 @@
+# ── Dockerfile for the Next.js (TypeScript) frontend ─────────────────────────
+#
+# Multi-stage build mirrors docker/Dockerfile.api/.ui:
+#   Stage 1 (deps)    — pnpm install with cached lockfile (no app code yet)
+#   Stage 2 (builder) — copy source + run `pnpm build`, producing .next/standalone
+#   Stage 3 (runner)  — copy only standalone output + static + public, run node
+#
+# The standalone output is enabled in web/next.config.ts. It contains a
+# self-contained server.js plus only the traced node_modules — typically
+# 30–60 MB total instead of dragging the full ~500 MB node_modules tree
+# into the runtime image.
+#
+# Usage:
+#   Build:  docker build -f docker/Dockerfile.web -t amenity-web .
+#   Run:    docker run -p 3001:3000 -e API_BASE_URL=http://api:8000 amenity-web
+
+# Pin the alpine variant so musl libc is identical across stages. The host
+# uses Node 24; we match here so locally built native modules (sharp) match.
+ARG NODE_IMAGE=node:24-alpine
+
+# ── Stage 1: install dependencies ────────────────────────────────────────────
+FROM ${NODE_IMAGE} AS deps
+WORKDIR /app
+
+# Alpine ships musl, but sharp's prebuilt binaries need libc6-compat for some
+# glibc-linked optional paths. Keeps the image small and avoids `apk add`
+# during runtime.
+RUN apk add --no-cache libc6-compat
+
+# Enable corepack so we can call `pnpm` without `npm i -g pnpm`. Corepack ships
+# with Node 16+ and pins pnpm to the version declared in package.json's
+# `packageManager` field (or latest if absent).
+RUN corepack enable
+
+# Copy only the dependency manifests first — this layer is cached unless the
+# manifests change, which keeps rebuilds fast when only application code moves.
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
+
+# `--frozen-lockfile` refuses to mutate pnpm-lock.yaml. CI safety.
+RUN pnpm install --frozen-lockfile
+
+# ── Stage 2: build the standalone server ─────────────────────────────────────
+FROM ${NODE_IMAGE} AS builder
+WORKDIR /app
+RUN corepack enable
+
+# Reuse the node_modules tree from the deps stage so we don't reinstall.
+COPY --from=deps /app/node_modules ./node_modules
+COPY web/ ./
+
+# Disable Next telemetry inside the build to avoid a network call during CI.
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN pnpm build
+
+# ── Stage 3: tiny runtime image ──────────────────────────────────────────────
+FROM ${NODE_IMAGE} AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+# Next.js standalone server reads PORT and HOSTNAME from the env.
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+# Drop root for the runtime container. Next.js docs recommend uid 1001.
+RUN addgroup --system --gid 1001 nodejs \
+  && adduser  --system --uid 1001 nextjs
+
+# curl is used by the docker-compose healthcheck.
+RUN apk add --no-cache curl
+
+# The standalone output already includes a minimal server.js plus only the
+# traced node_modules. We copy the static folder and public folder separately
+# because Next.js does not include them in standalone output by design.
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+
+USER nextjs
+
+EXPOSE 3000
+
+CMD ["node", "server.js"]
