@@ -44,12 +44,15 @@ FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
 RUN corepack enable
 
+# CI=true tells pnpm to skip the interactive TTY confirmation when it needs
+# to purge/replace node_modules — required because Docker build has no TTY.
+# NEXT_TELEMETRY_DISABLED avoids a network call during the build.
+ENV CI=true
+ENV NEXT_TELEMETRY_DISABLED=1
+
 # Reuse the node_modules tree from the deps stage so we don't reinstall.
 COPY --from=deps /app/node_modules ./node_modules
 COPY web/ ./
-
-# Disable Next telemetry inside the build to avoid a network call during CI.
-ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN pnpm build
 
