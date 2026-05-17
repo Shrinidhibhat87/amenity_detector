@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+/* Amenity Detector design tokens. Source: ui/docs/design-system.jsx + CLAUDE_handbook.md §14.
+   Warm, light real-estate marketplace aesthetic: cream surfaces, terracotta accent, warm charcoal ink. */
+@theme {
+  /* Surfaces */
+  --color-bg: #FBF8F3;
+  --color-surface: #FFFFFF;
+  --color-surface-alt: #F4EEE3;
+  --color-surface-muted: #EDE6D6;
+
+  /* Ink */
+  --color-ink: #1C1917;
+  --color-ink-soft: #3F3A33;
+  --color-ink-muted: #78716C;
+  --color-ink-faint: #A8A29E;
+
+  /* Borders */
+  --color-border: #E8E1D1;
+  --color-border-strong: #D6CDB7;
+
+  /* Brand accent — terracotta */
+  --color-accent: #B4541F;
+  --color-accent-hover: #9A4419;
+  --color-accent-soft: #F4E2CE;
+  --color-accent-ink: #3D1A07;
+
+  /* Semantic */
+  --color-ok: #5C7A3F;
+  --color-ok-soft: #E7EEDA;
+  --color-warn: #B07A1A;
+  --color-warn-soft: #F6E9C8;
+  --color-err: #9C3A2E;
+  --color-err-soft: #F3D9D2;
+
+  /* Map */
+  --color-map-water: #E5EEF1;
+  --color-map-land: #F4EEE3;
+  --color-map-road: #FFFFFF;
+
+  /* Fonts (next/font injects --font-* vars; defaults below cover SSR before hydration) */
+  --font-display: var(--font-instrument-serif), "Times New Roman", Georgia, serif;
+  --font-sans: var(--font-geist-sans), "Geist Fallback", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: var(--font-jetbrains-mono), "SF Mono", Menlo, monospace;
+
+  /* Radii */
+  --radius-input: 10px;
+  --radius-card: 14px;
+  --radius-pill: 999px;
+
+  /* Motion */
+  --ease-out-app: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@layer base {
+  html, body {
+    background: var(--color-bg);
+    color: var(--color-ink);
+  }
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .font-display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    line-height: 1.05;
+  }
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+@keyframes ad-fadeup {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ad-blink {
+  50% { opacity: 0; }
+}
+
+.ad-fade-up {
+  animation: ad-fadeup 0.5s var(--ease-out-app) both;
+}
+.ad-caret::after {
+  content: "|";
+  margin-left: 2px;
+  color: var(--color-accent);
+  font-weight: 300;
+  animation: ad-blink 1s steps(2) infinite;
+}
