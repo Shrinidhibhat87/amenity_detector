@@ -16,7 +16,8 @@ The local Docker Compose stack runs:
 
 | Component | Status | Purpose |
 |---|---:|---|
-| Gradio UI | Done | Upload, listing-details accordion, per-room amenity review, browse/search |
+| Gradio UI | Done (legacy) | Upload, listing-details accordion, per-room amenity review, browse/search. Kept running until the TypeScript frontend reaches feature parity. |
+| Next.js web frontend | In progress (Phase A) | TypeScript revamp of the UI. Foundation shipped: design tokens, primitives, Zod schemas, Vitest. |
 | FastAPI API | Done | Property/image CRUD, search, description, and listing-metadata PATCH endpoints |
 | PostgreSQL | Done | Stores properties, images, detected amenities, and Phase 9 listing metadata |
 | Alembic migrations | Done | Schema versioning (`0001_phase8_baseline` → `0002_phase9_listing_metadata`) |
@@ -128,7 +129,8 @@ Open:
 
 | Service | URL |
 |---|---|
-| Gradio UI | http://localhost:7860 |
+| Gradio UI (legacy) | http://localhost:7860 |
+| Next.js web (Phase A) | http://localhost:3001 |
 | FastAPI docs | http://localhost:8000/docs |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
@@ -305,11 +307,52 @@ Run the API locally:
 uv run uvicorn api.main:app --reload
 ```
 
-Run the UI locally:
+Run the Gradio UI locally (legacy frontend, kept until the TypeScript revamp reaches parity):
 
 ```bash
 API_BASE_URL=http://localhost:8000 uv run python -m ui.app
 ```
+
+### Web frontend (TypeScript, in progress)
+
+The new frontend lives in `/web` and is a Next.js 15 App Router app written in
+strict TypeScript. Phase A (Foundation) shipped:
+
+- Next.js scaffold with Turbopack + Tailwind v4
+- `tsconfig` strict + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`
+- Design tokens lifted from `ui/docs/design-system.jsx` into Tailwind `@theme`
+- Instrument Serif + Geist + JetBrains Mono via `next/font/google`
+- Zod schemas mirroring `api/schemas.py` (single source of truth for shapes)
+- Primitives (`Button`, `Chip`, `Card`, `Input`, `Select`) with Vitest tests
+- `/kitchen-sink` showcase route (no-indexed)
+
+Run it locally (Node 20+):
+
+```bash
+cd web
+pnpm install
+pnpm dev            # http://localhost:3000
+pnpm test           # Vitest unit suite
+pnpm typecheck      # tsc --noEmit
+pnpm build          # standalone production server
+```
+
+Run it via Docker Compose alongside the rest of the stack:
+
+```bash
+docker compose up --build web
+# Open http://localhost:3001
+```
+
+The Next.js container listens on port 3000 internally and is published on host
+port 3001 (Grafana already owns 3000). The `CORS_ORIGINS` env var on the API
+defaults to localhost:7860 (Gradio), localhost:3001 (web on host), and the
+internal Docker DNS names `web:3000` and `ui:7860`. Override with a
+comma-separated list when deploying to a real domain.
+
+The Gradio UI stays in `/ui` and keeps working — it will be removed in a single
+cleanup PR once the web frontend covers the upload, browse, detail, and search
+paths end-to-end.
 
 When changing UI code in Docker, rebuild the UI service:
 
@@ -459,9 +502,10 @@ amenity_detector/
 ├── db/                          # SQLAlchemy models, sessions, Alembic migrations
 │   └── migrations/versions/     # 0001_phase8_baseline.py, 0002_phase9_listing_metadata.py
 ├── models/                      # VLMClient interface + OpenRouter client
-├── ui/                          # Gradio frontend, listing-details accordion, review state
+├── ui/                          # Gradio frontend (legacy — to be removed after web parity)
+├── web/                         # Next.js 15 + TypeScript frontend (Phase A foundation)
 ├── monitoring/                  # Prometheus and Grafana provisioning
-├── docker/                      # API and UI Dockerfiles
+├── docker/                      # API, UI, and web Dockerfiles
 ├── tests/                       # Unit and integration tests
 ├── docker-compose.yml           # Local full-stack orchestration
 ├── pyproject.toml               # Dependencies and tool config
@@ -499,11 +543,17 @@ Completed:
 
 Next likely work:
 
+- **TypeScript frontend revamp** (in progress — Phase A foundation shipped).
+  Subsequent sub-phases: P-B browse + SEO (Server Components + JSON-LD +
+  `sitemap.ts` + `llms.txt`), P-C wizard (4-step detect flow, Zustand+persist),
+  P-D natural-language search, P-E cutover (Gradio UI removed in one PR).
 - Phase 10 — locality enrichment via OpenStreetMap Overpass + Nominatim
   (auto-populated POI summary per property, cached 30 days).
 - Phase 11 — hybrid NL search: pgvector + Postgres full-text, LLM-driven
   filter extraction over the Phase 9 metadata + per-room amenity tuples.
-- Phase 12 — `/public/*` SEO surface: server-rendered listing pages with
-  JSON-LD, sitemap.xml, robots.txt, llms.txt, JSONL feed for AI agents.
+- Phase 12 — SEO surface: moved from FastAPI Jinja routes to Next.js
+  Server Components. Per-listing HTML, JSON-LD `Accommodation`, `sitemap.ts`,
+  `robots.ts`, `llms.txt`, JSONL feed for AI agents — all rendered by the
+  `/web` app, with the API staying a thin REST layer.
 - Cloud deployment target and managed database/storage.
 - Voice-assisted property search.
