@@ -10,7 +10,11 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { ApiError, uploadImage } from '@/lib/api';
-import { useWizardStore, type AmenityItem } from '@/lib/wizard-store';
+import {
+  useWizardStore,
+  type AmenityItem,
+  type UploadedImage,
+} from '@/lib/wizard-store';
 import { Button } from '@/components/ui';
 
 // Per-image timeout — matches the Gradio UI's skip-on-failure pattern so a
@@ -43,21 +47,42 @@ export default function UploadStepPage() {
       if (state.step !== 'upload') return;
       setIsUploading(true);
 
-      // Process files sequentially — one VLM call at a time keeps backend
-      // load predictable and lets us show per-image progress accurately.
-      for (const file of files) {
-        if (!ALLOWED_TYPES.includes(file.type as (typeof ALLOWED_TYPES)[number])) {
-          addImage({
-            clientId: crypto.randomUUID(),
-            fileName: file.name,
-            status: 'failed',
-            errorMessage: `Unsupported type: ${file.type || 'unknown'}`,
-          });
-          continue;
-        }
+      // Register every file in the store upfront so the total count is stable
+      // throughout the batch — the user sees "1/N, 2/N, … N/N" instead of
+      // "1/1, 1/2, …" caused by the denominator growing as we added one at a
+      // time. Invalid types are recorded as 'failed' immediately and skipped
+      // during the upload pass.
+      type Pending = {
+        clientId: string;
+        file: File;
+        valid: boolean;
+      };
+      const queue: Pending[] = files.map((file) => ({
+        clientId: crypto.randomUUID(),
+        file,
+        valid: ALLOWED_TYPES.includes(file.type as (typeof ALLOWED_TYPES)[number]),
+      }));
 
-        const clientId = crypto.randomUUID();
-        addImage({ clientId, fileName: file.name, status: 'uploading' });
+      for (const item of queue) {
+        const entry: UploadedImage = item.valid
+          ? {
+              clientId: item.clientId,
+              fileName: item.file.name,
+              status: 'uploading',
+            }
+          : {
+              clientId: item.clientId,
+              fileName: item.file.name,
+              status: 'failed',
+              errorMessage: `Unsupported type: ${item.file.type || 'unknown'}`,
+            };
+        addImage(entry);
+      }
+
+      // Process valid files sequentially — one VLM call at a time keeps
+      // backend load predictable.
+      for (const item of queue) {
+        if (!item.valid) continue;
 
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), PER_IMAGE_TIMEOUT_MS);
@@ -65,7 +90,7 @@ export default function UploadStepPage() {
         try {
           const res = await uploadImage({
             propertyId: state.propertyId,
-            file,
+            file: item.file,
             modelName: state.config.model_name,
             signal: controller.signal,
           });
@@ -77,7 +102,7 @@ export default function UploadStepPage() {
             present: a.is_present,
           }));
 
-          updateImage(clientId, {
+          updateImage(item.clientId, {
             status: 'done',
             serverId: res.image.id,
             amenities,
@@ -93,7 +118,7 @@ export default function UploadStepPage() {
                 : err instanceof Error
                   ? err.message
                   : 'Unknown error';
-          updateImage(clientId, { status: 'failed', errorMessage: msg });
+          updateImage(item.clientId, { status: 'failed', errorMessage: msg });
         }
       }
 
@@ -120,6 +145,16 @@ export default function UploadStepPage() {
 
   if (state.step !== 'upload') return null;
   const doneCount = state.images.filter((i) => i.status === 'done').length;
+  const finishedCount = state.images.filter(
+    (i) => i.status === 'done' || i.status === 'failed',
+  ).length;
+  // While a file is mid-flight we show "(finished + 1)/total" so the user
+  // sees the in-progress index (1/N, 2/N, …) rather than the lagging
+  // finished-count.
+  const total = state.images.length;
+  const displayedCount = isUploading
+    ? Math.min(finishedCount + 1, total)
+    : finishedCount;
   const canContinue = doneCount > 0 && !isUploading;
 
   return (
@@ -200,7 +235,7 @@ export default function UploadStepPage() {
 
       <div className="flex items-center justify-between pt-2">
         <p className="font-mono text-xs text-ink-muted">
-          {doneCount}/{state.images.length} processed
+          {displayedCount}/{total} processed
         </p>
         <Button
           onClick={() => {
