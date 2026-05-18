@@ -90,7 +90,7 @@ export default function DescribeStepPage() {
         >
           ← Back to review
         </button>
-        <Button onClick={() => void save()} disabled={saving || state.description.trim() === ''}>
+        <Button onClick={() => void save()} disabled={saving}>
           {saving ? 'Saving…' : 'Save & publish'}
         </Button>
       </div>
