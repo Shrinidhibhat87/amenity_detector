@@ -77,3 +77,6 @@ GIT_CONVENTIONS.md
 
 # Visual brainstorming session files
 .superpowers/
+
+# ── Local bug tracker (personal notes, not for shared repo) ──────────────────
+bugs/
