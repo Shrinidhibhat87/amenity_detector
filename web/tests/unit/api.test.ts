@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiError,
+  applyClientFilters,
   createProperty,
   describeProperty,
   getImageUrl,
@@ -9,6 +10,7 @@ import {
   listProperties,
   patchImage,
   patchProperty,
+  searchProperties,
   uploadImage,
 } from '../../lib/api';
 
@@ -281,5 +283,115 @@ describe('patchProperty', () => {
     const init = (mockFetch.mock.calls[0] as [string, RequestInit])[1];
     expect(init.method).toBe('PATCH');
     expect(init.body).toBe(JSON.stringify({ description: 'Updated' }));
+  });
+});
+
+// ── applyClientFilters ───────────────────────────────────────────────────────
+
+describe('applyClientFilters', () => {
+  const rentApt = {
+    ...minSummary,
+    id: 'rent-1',
+    listing_type: 'rent' as const,
+    price: 1200,
+    currency: 'EUR',
+    num_bedrooms: 2,
+  };
+  const saleHouse = {
+    ...minSummary,
+    id: 'sale-1',
+    listing_type: 'sale' as const,
+    price: 350000,
+    currency: 'EUR',
+    num_bedrooms: 4,
+  };
+  const noMeta = { ...minSummary, id: 'meta-less' };
+
+  it('returns input unchanged when filters are empty', () => {
+    const out = applyClientFilters([rentApt, saleHouse, noMeta], {});
+    expect(out).toHaveLength(3);
+  });
+
+  it('filters by listing_type', () => {
+    const out = applyClientFilters([rentApt, saleHouse], { listing_type: 'rent' });
+    expect(out.map((p) => p.id)).toEqual(['rent-1']);
+  });
+
+  it('drops properties with no listing_type when filter is set', () => {
+    const out = applyClientFilters([rentApt, noMeta], { listing_type: 'rent' });
+    expect(out.map((p) => p.id)).toEqual(['rent-1']);
+  });
+
+  it('filters by num_bedrooms with equality', () => {
+    const out = applyClientFilters([rentApt, saleHouse], { num_bedrooms: 2 });
+    expect(out.map((p) => p.id)).toEqual(['rent-1']);
+  });
+
+  it('filters by price_max (inclusive)', () => {
+    const out = applyClientFilters([rentApt, saleHouse], { price_max: 1200 });
+    expect(out.map((p) => p.id)).toEqual(['rent-1']);
+  });
+
+  it('matches currency when both filter and property have it', () => {
+    const out = applyClientFilters(
+      [rentApt, { ...rentApt, id: 'rent-2', currency: 'USD' }],
+      { price_max: 2000, currency: 'EUR' },
+    );
+    expect(out.map((p) => p.id)).toEqual(['rent-1']);
+  });
+
+  it('does not filter on currency when filter has none', () => {
+    const out = applyClientFilters(
+      [rentApt, { ...rentApt, id: 'rent-2', currency: 'USD' }],
+      { price_max: 2000 },
+    );
+    expect(out.map((p) => p.id).sort()).toEqual(['rent-1', 'rent-2']);
+  });
+
+  it('combines all dimensions (AND)', () => {
+    const out = applyClientFilters([rentApt, saleHouse, noMeta], {
+      listing_type: 'rent',
+      num_bedrooms: 2,
+      price_max: 1500,
+      currency: 'EUR',
+    });
+    expect(out.map((p) => p.id)).toEqual(['rent-1']);
+  });
+});
+
+// ── searchProperties ─────────────────────────────────────────────────────────
+
+describe('searchProperties', () => {
+  it('hits /search?amenities=... when amenities are provided', async () => {
+    mockFetch.mockResolvedValueOnce(okResponse([minSummary]));
+    await searchProperties({ amenities: ['pool', 'wifi'], filters: {} });
+    const url = (mockFetch.mock.calls[0] as [string])[0];
+    expect(url).toBe(`${BASE}/api/v1/properties/search?amenities=pool%2Cwifi`);
+  });
+
+  it('falls back to listProperties when amenities is empty', async () => {
+    mockFetch.mockResolvedValueOnce(okResponse([minSummary]));
+    await searchProperties({ amenities: [], filters: {} });
+    const url = (mockFetch.mock.calls[0] as [string])[0];
+    expect(url).toContain('/api/v1/properties/');
+    expect(url).not.toContain('/search');
+  });
+
+  it('applies client-side filters to the server result', async () => {
+    const rent = { ...minSummary, id: 'r', listing_type: 'rent' as const };
+    const sale = { ...minSummary, id: 's', listing_type: 'sale' as const };
+    mockFetch.mockResolvedValueOnce(okResponse([rent, sale]));
+    const out = await searchProperties({
+      amenities: ['pool'],
+      filters: { listing_type: 'rent' },
+    });
+    expect(out.map((p) => p.id)).toEqual(['r']);
+  });
+
+  it('throws ApiError when the upstream /search returns non-2xx', async () => {
+    mockFetch.mockResolvedValueOnce(errResponse(400));
+    await expect(
+      searchProperties({ amenities: ['x'], filters: {} }),
+    ).rejects.toThrow(ApiError);
   });
 });
