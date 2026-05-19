@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ApiError, searchProperties } from '@/lib/api';
+import { ApiError, searchProperties, type ClientFilters } from '@/lib/api';
 import { parseQuery } from '@/lib/nl-parser';
 import { PropertyCard } from '@/components/property-card';
-import { Chip } from '@/components/ui';
+import { SearchFilterChips } from '@/components/search-filter-chips';
 
 // Next 15: searchParams is a Promise in async Server Components.
 type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> };
@@ -20,6 +20,47 @@ export const metadata: Metadata = {
 function pickString(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return value[0] ?? '';
   return value ?? '';
+}
+
+/**
+ * URL overrides take precedence over the parser. An empty string override
+ * (`listing_type=`) means "user explicitly cleared this filter", so the
+ * parser's value is discarded for that dimension and we leave it unset.
+ * A missing param means "fall back to whatever the parser detected".
+ */
+function applyOverrides(
+  parsed: ClientFilters,
+  params: Record<string, string | string[] | undefined>,
+): ClientFilters {
+  const out: ClientFilters = {};
+
+  const lt = params.listing_type;
+  if (lt === undefined) {
+    if (parsed.listing_type != null) out.listing_type = parsed.listing_type;
+  } else if (lt === 'rent' || lt === 'sale') {
+    out.listing_type = lt;
+  }
+
+  const bd = pickString(params.num_bedrooms);
+  if (bd === '' && params.num_bedrooms === undefined) {
+    if (parsed.num_bedrooms != null) out.num_bedrooms = parsed.num_bedrooms;
+  } else if (bd !== '') {
+    const n = Number(bd);
+    if (Number.isFinite(n) && n > 0) out.num_bedrooms = n;
+  }
+
+  const pm = pickString(params.price_max);
+  if (pm === '' && params.price_max === undefined) {
+    if (parsed.price_max != null) out.price_max = parsed.price_max;
+    if (parsed.currency != null) out.currency = parsed.currency;
+  } else if (pm !== '') {
+    const n = Number(pm);
+    if (Number.isFinite(n) && n > 0) out.price_max = n;
+    const curr = pickString(params.currency).toUpperCase();
+    if (curr.length === 3) out.currency = curr;
+  }
+
+  return out;
 }
 
 export default async function SearchPage({ searchParams }: Props) {
@@ -63,13 +104,14 @@ export default async function SearchPage({ searchParams }: Props) {
   // Server Component, calling our own route handler would be a needless
   // round-trip. Client-side surfaces (typeahead, etc.) still use /api/parse.
   const parsed = parseQuery(q);
+  const effective = applyOverrides(parsed.filters, params);
 
   let results: Awaited<ReturnType<typeof searchProperties>> = [];
   let error: string | null = null;
   try {
     results = await searchProperties({
       amenities: parsed.amenities,
-      filters: parsed.filters,
+      filters: effective,
     });
   } catch (err) {
     error =
@@ -96,35 +138,16 @@ export default async function SearchPage({ searchParams }: Props) {
         </div>
         <h1 className="font-display text-3xl text-ink">Results for &ldquo;{q}&rdquo;</h1>
 
-        {/* Read-only parsed-filter strip. Editable controls land in commit 5. */}
-        <div className="mt-4 flex flex-wrap gap-2">
-          {parsed.filters.listing_type != null && (
-            <Chip tone="accent" active>
-              {parsed.filters.listing_type === 'rent' ? 'For rent' : 'For sale'}
-            </Chip>
-          )}
-          {parsed.filters.num_bedrooms != null && (
-            <Chip tone="accent" active>
-              {parsed.filters.num_bedrooms} bed
-            </Chip>
-          )}
-          {parsed.filters.price_max != null && (
-            <Chip tone="accent" active>
-              ≤ {parsed.filters.price_max.toLocaleString()}{' '}
-              {parsed.filters.currency ?? ''}
-            </Chip>
-          )}
-          {parsed.amenities.map((a) => (
-            <Chip key={a} active>
-              {a}
-            </Chip>
-          ))}
-          {(parsed.filters.room_amenities ?? []).map((ra) => (
-            <Chip key={`${ra.room}-${ra.amenity}`} tone="ok" active>
-              {ra.amenity} in {ra.room}
-            </Chip>
-          ))}
-        </div>
+        <SearchFilterChips
+          filters={{
+            listing_type: effective.listing_type,
+            num_bedrooms: effective.num_bedrooms,
+            price_max: effective.price_max,
+            currency: effective.currency,
+            amenities: parsed.amenities,
+            room_amenities: parsed.filters.room_amenities ?? [],
+          }}
+        />
       </header>
 
       {error != null && (
