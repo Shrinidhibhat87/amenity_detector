@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { listProperties } from '@/lib/api';
 import { PropertyCard } from '@/components/property-card';
 
@@ -18,9 +19,17 @@ export default async function BrowsePage() {
   return (
     <main className="flex-1 px-6 py-12 max-w-7xl mx-auto w-full">
       <header className="mb-8">
-        <p className="font-mono text-xs uppercase tracking-[0.18em] text-ink-muted mb-2">
-          Browse
-        </p>
+        <div className="flex items-center justify-between mb-2">
+          <p className="font-mono text-xs uppercase tracking-[0.18em] text-ink-muted">
+            Browse
+          </p>
+          <Link
+            href="/"
+            className="font-mono text-xs uppercase tracking-[0.18em] text-ink-muted hover:text-ink transition-colors"
+          >
+            ← Home
+          </Link>
+        </div>
         <h1 className="font-display text-3xl text-ink">Properties</h1>
         {properties.length > 0 && (
           <p className="mt-1 text-sm text-ink-soft">
