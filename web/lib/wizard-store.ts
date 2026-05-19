@@ -100,6 +100,12 @@ export type WizardState =
 interface WizardStore {
   state: WizardState;
 
+  // True once Zustand persist has restored from localStorage. Step pages must
+  // gate their wrong-step guards on this so the initial default state
+  // (`step: 'config'`) does not cause a redirect before rehydration finishes.
+  hasHydrated: boolean;
+  setHasHydrated: (value: boolean) => void;
+
   setConfig: (patch: Partial<ConfigInput>) => void;
   startUpload: (propertyId: string) => void;
   addImage: (image: UploadedImage) => void;
@@ -116,6 +122,8 @@ export const useWizardStore = create<WizardStore>()(
   persist(
     (set) => ({
       state: { step: 'config', config: { ...EMPTY_CONFIG } },
+      hasHydrated: false,
+      setHasHydrated: (value) => set({ hasHydrated: value }),
 
       setConfig: (patch) =>
         set((s) => {
@@ -214,8 +222,19 @@ export const useWizardStore = create<WizardStore>()(
       name: 'wizard',
       storage: createJSONStorage(() => localStorage),
       // Persist only the state slice, not actions (which are reconstructed by
-      // the factory anyway).
+      // the factory anyway). hasHydrated is intentionally excluded so it
+      // always starts false until the rehydrate callback fires.
       partialize: (s) => ({ state: s.state }),
+      onRehydrateStorage: () => (rehydrated, error) => {
+        if (error != null || rehydrated == null) return;
+        // `done` is terminal — restoring it would trap every subsequent
+        // /detect/* visit on the completion screen. Reset to a clean config
+        // so reopening the app starts a fresh listing.
+        if (rehydrated.state.step === 'done') {
+          rehydrated.state = { step: 'config', config: { ...EMPTY_CONFIG } };
+        }
+        rehydrated.setHasHydrated(true);
+      },
     },
   ),
 );
