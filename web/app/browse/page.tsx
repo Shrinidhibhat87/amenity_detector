@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { listProperties } from '@/lib/api';
 import { PropertyCard } from '@/components/property-card';
+import { BrowseSearchBar } from '@/components/browse-search-bar';
 
 // Skip build-time prerender — the API isn't reachable during `docker build`.
 // This page renders on every request (SSR). Acceptable: the listing index
@@ -36,6 +37,9 @@ export default async function BrowsePage() {
             {properties.length} listing{properties.length !== 1 ? 's' : ''}
           </p>
         )}
+        <div className="mt-5">
+          <BrowseSearchBar />
+        </div>
       </header>
 
       {properties.length === 0 ? (
