@@ -11,6 +11,7 @@ export default function DescribeStepPage() {
   const state = useWizardStore((s) => s.state);
   const hasHydrated = useWizardStore((s) => s.hasHydrated);
   const setDescription = useWizardStore((s) => s.setDescription);
+  const goBackToReview = useWizardStore((s) => s.goBackToReview);
   const finish = useWizardStore((s) => s.finish);
 
   const [saving, setSaving] = useState(false);
@@ -88,7 +89,12 @@ export default function DescribeStepPage() {
       <div className="flex items-center justify-between">
         <button
           type="button"
-          onClick={() => router.push('/detect/review')}
+          onClick={() => {
+            // Walk the step backwards before navigating so the review page's
+            // wrong-step guard does not immediately redirect us back here.
+            goBackToReview();
+            router.push('/detect/review');
+          }}
           className="font-mono text-xs uppercase tracking-widest text-ink-muted hover:text-ink transition-colors"
         >
           ← Back to review
