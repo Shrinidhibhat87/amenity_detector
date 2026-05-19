@@ -8,6 +8,7 @@ import {
   describeProperty,
   getImageUrl,
   patchImage,
+  shouldUnoptimizeApiImages,
 } from '@/lib/api';
 import { useWizardStore, type AmenityItem, type UploadedImage } from '@/lib/wizard-store';
 import { Button } from '@/components/ui';
@@ -121,6 +122,7 @@ export default function ReviewStepPage() {
                   fill
                   sizes="200px"
                   className="object-cover"
+                  unoptimized={shouldUnoptimizeApiImages()}
                 />
               </div>
               <div className="space-y-3">

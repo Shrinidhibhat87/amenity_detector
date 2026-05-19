@@ -1,6 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { getImageUrl } from '@/lib/api';
+import { getImageUrl, shouldUnoptimizeApiImages } from '@/lib/api';
 import type { PropertySummary } from '@/lib/schemas';
 
 function formatPrice(
@@ -61,6 +61,7 @@ export function PropertyCard({ property }: PropertyCardProps) {
             fill
             sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
             className="object-cover group-hover:scale-[1.02] transition-transform duration-300"
+            unoptimized={shouldUnoptimizeApiImages()}
           />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center">

@@ -58,6 +58,29 @@ export function getImageUrl(imageId: string): string {
   return `${getBaseUrl()}/api/v1/images/${imageId}`;
 }
 
+/**
+ * Next.js 14.2+/15 refuses to proxy images whose upstream resolves to a
+ * private IP (SSRF guard), and `remotePatterns` does not bypass that check.
+ * In dev the API lives at http://localhost:8000 / http://api:8000, both of
+ * which trip the guard — so we pass `unoptimized` on those images to bypass
+ * the optimiser entirely. Production hosts (real domains) still get the
+ * optimised path.
+ */
+export function shouldUnoptimizeApiImages(): boolean {
+  const base = getBaseUrl();
+  try {
+    const { hostname } = new URL(base);
+    return (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '::1' ||
+      hostname === 'api'
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function apiFetch<T>(
   schema: { parse: (data: unknown) => T },
   path: string,

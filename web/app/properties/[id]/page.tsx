@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { ApiError, getImageUrl, getProperty } from '@/lib/api';
+import { ApiError, getImageUrl, getProperty, shouldUnoptimizeApiImages } from '@/lib/api';
 import type { PropertyDetail } from '@/lib/schemas';
 import { Chip } from '@/components/ui';
 
@@ -191,6 +191,7 @@ export default async function PropertyDetailPage({ params }: Props) {
                     sizes="(max-width: 768px) 50vw, 33vw"
                     className="object-cover"
                     priority={i === 0}
+                    unoptimized={shouldUnoptimizeApiImages()}
                   />
                 </div>
               ))}
