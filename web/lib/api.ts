@@ -201,11 +201,14 @@ export async function patchProperty(
 // step here can be deleted. Keep the call site (`searchProperties`) as the
 // single seam that Phase 11 swaps.
 
+// `field?: T | undefined` (not `field?: T`) is required by
+// exactOptionalPropertyTypes. The parser emits explicit `undefined` for
+// missing values, so this shape must accept that.
 export interface ClientFilters {
-  listing_type?: 'rent' | 'sale';
-  price_max?: number;
-  currency?: string;
-  num_bedrooms?: number;
+  listing_type?: 'rent' | 'sale' | undefined;
+  price_max?: number | undefined;
+  currency?: string | undefined;
+  num_bedrooms?: number | undefined;
 }
 
 export interface SearchOptions {
