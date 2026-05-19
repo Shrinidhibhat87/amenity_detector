@@ -26,6 +26,7 @@ const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 export default function UploadStepPage() {
   const router = useRouter();
   const state = useWizardStore((s) => s.state);
+  const hasHydrated = useWizardStore((s) => s.hasHydrated);
   const addImage = useWizardStore((s) => s.addImage);
   const updateImage = useWizardStore((s) => s.updateImage);
   const goToReview = useWizardStore((s) => s.goToReview);
@@ -34,13 +35,16 @@ export default function UploadStepPage() {
   const [dragOver, setDragOver] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
-  // Wrong-step guard — bounce the user to the correct page.
+  // Wrong-step guard — bounce the user to the correct page. Held back until
+  // the persist middleware finishes restoring so we do not redirect away
+  // from the default `config` state on initial render.
   useEffect(() => {
+    if (!hasHydrated) return;
     if (state.step === 'config') router.replace('/detect/config');
     if (state.step === 'review' || state.step === 'describe' || state.step === 'done') {
       router.replace(`/detect/${state.step}`);
     }
-  }, [state.step, router]);
+  }, [hasHydrated, state.step, router]);
 
   const startUpload = useCallback(
     async (files: File[]) => {

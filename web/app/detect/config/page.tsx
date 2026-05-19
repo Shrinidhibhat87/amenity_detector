@@ -10,6 +10,7 @@ import { Button, Input, Select } from '@/components/ui';
 export default function ConfigStepPage() {
   const router = useRouter();
   const state = useWizardStore((s) => s.state);
+  const hasHydrated = useWizardStore((s) => s.hasHydrated);
   const setConfig = useWizardStore((s) => s.setConfig);
   const startUpload = useWizardStore((s) => s.startUpload);
 
@@ -41,13 +42,16 @@ export default function ConfigStepPage() {
 
   // If we're past the config step, redirect to wherever we left off.
   // Lets the user pick up a wizard run across reloads (persist middleware).
+  // Skipped until hydration finishes so the SSR default (`step: 'config'`)
+  // does not flash a wrong redirect.
   useEffect(() => {
+    if (!hasHydrated) return;
     if (state.step !== 'config') {
       router.replace(`/detect/${state.step}`);
     }
-  }, [state.step, router]);
+  }, [hasHydrated, state.step, router]);
 
-  if (config == null) return null;
+  if (!hasHydrated || config == null) return null;
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();

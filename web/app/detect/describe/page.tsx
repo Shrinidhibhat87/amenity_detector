@@ -9,20 +9,23 @@ import { Button } from '@/components/ui';
 export default function DescribeStepPage() {
   const router = useRouter();
   const state = useWizardStore((s) => s.state);
+  const hasHydrated = useWizardStore((s) => s.hasHydrated);
   const setDescription = useWizardStore((s) => s.setDescription);
   const finish = useWizardStore((s) => s.finish);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Wrong-step guard.
+  // Wrong-step guard, deferred until persist has rehydrated so the default
+  // state does not bounce the user before the real step is known.
   useEffect(() => {
+    if (!hasHydrated) return;
     if (state.step !== 'describe') {
       router.replace(state.step === 'done' ? '/detect/done' : `/detect/${state.step}`);
     }
-  }, [state.step, router]);
+  }, [hasHydrated, state.step, router]);
 
-  if (state.step !== 'describe') return null;
+  if (!hasHydrated || state.step !== 'describe') return null;
 
   async function save() {
     if (state.step !== 'describe') return;
