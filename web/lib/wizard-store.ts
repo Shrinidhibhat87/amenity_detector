@@ -112,6 +112,7 @@ interface WizardStore {
   updateImage: (clientId: string, patch: Partial<UploadedImage>) => void;
   goToReview: () => void;
   setDescription: (text: string) => void;
+  goBackToReview: () => void;
   finish: () => void;
   reset: () => void;
 }
@@ -197,6 +198,23 @@ export const useWizardStore = create<WizardStore>()(
             return { state: { ...s.state, description: text } };
           }
           return s;
+        }),
+
+      goBackToReview: () =>
+        set((s) => {
+          // The describe step holds a generated description; walking back to
+          // review discards it. The review page's wrong-step guard would
+          // otherwise bounce the user back to describe, so we have to mutate
+          // the step before navigating.
+          if (s.state.step !== 'describe') return s;
+          return {
+            state: {
+              step: 'review',
+              config: s.state.config,
+              propertyId: s.state.propertyId,
+              images: s.state.images,
+            },
+          };
         }),
 
       finish: () =>
