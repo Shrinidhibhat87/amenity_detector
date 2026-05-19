@@ -9,13 +9,15 @@ import { Button } from '@/components/ui';
 export default function DoneStepPage() {
   const router = useRouter();
   const state = useWizardStore((s) => s.state);
+  const hasHydrated = useWizardStore((s) => s.hasHydrated);
   const reset = useWizardStore((s) => s.reset);
 
   useEffect(() => {
+    if (!hasHydrated) return;
     if (state.step !== 'done') router.replace(`/detect/${state.step}`);
-  }, [state.step, router]);
+  }, [hasHydrated, state.step, router]);
 
-  if (state.step !== 'done') return null;
+  if (!hasHydrated || state.step !== 'done') return null;
 
   return (
     <div className="text-center space-y-6 py-10">

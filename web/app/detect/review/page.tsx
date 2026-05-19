@@ -15,23 +15,26 @@ import { Button } from '@/components/ui';
 export default function ReviewStepPage() {
   const router = useRouter();
   const state = useWizardStore((s) => s.state);
+  const hasHydrated = useWizardStore((s) => s.hasHydrated);
   const updateImage = useWizardStore((s) => s.updateImage);
   const setDescription = useWizardStore((s) => s.setDescription);
 
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Wrong-step guard.
+  // Wrong-step guard. Held until rehydration completes so the default
+  // state does not trigger a redirect before the persisted step is known.
   useEffect(() => {
+    if (!hasHydrated) return;
     if (state.step === 'config' || state.step === 'upload') {
       router.replace(`/detect/${state.step}`);
     }
     if (state.step === 'describe' || state.step === 'done') {
       router.replace(`/detect/${state.step}`);
     }
-  }, [state.step, router]);
+  }, [hasHydrated, state.step, router]);
 
-  if (state.step !== 'review') return null;
+  if (!hasHydrated || state.step !== 'review') return null;
 
   const doneImages = state.images.filter(
     (img): img is UploadedImage & { serverId: string; amenities: AmenityItem[] } =>
