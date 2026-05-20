@@ -27,6 +27,7 @@ from pathlib import Path
 
 from fastapi import HTTPException, Request
 
+from core.search.pipeline import SearchPipeline
 from db.session import get_db
 from models.registry import ModelRegistry
 
@@ -70,5 +71,36 @@ def get_image_storage_dir() -> Path:
     return Path(os.getenv("IMAGE_STORAGE_DIR", "./storage/images"))
 
 
+def get_search_pipeline(request: Request) -> SearchPipeline:
+    """Return the SearchPipeline singleton stored on ``app.state``.
+
+    Built once at startup with whatever parser/embedder credentials are
+    available. Missing credentials are not fatal — the pipeline degrades
+    to the regex parser + zero-vector cosine.
+    """
+    pipeline: SearchPipeline | None = getattr(request.app.state, "search_pipeline", None)
+    if pipeline is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Search pipeline not initialised. The service is starting up.",
+        )
+    return pipeline
+
+
+def get_embedder(request: Request):  # type: ignore[no-untyped-def]
+    """Return the optional EmbeddingsClient stored on ``app.state``.
+
+    ``None`` when no embeddings credentials were supplied — callers must
+    treat indexing as a no-op in that case.
+    """
+    return getattr(request.app.state, "embeddings_client", None)
+
+
 # Re-export get_db so routers only need to import from this module
-__all__ = ["get_db", "get_model_registry", "get_image_storage_dir"]
+__all__ = [
+    "get_db",
+    "get_model_registry",
+    "get_image_storage_dir",
+    "get_search_pipeline",
+    "get_embedder",
+]

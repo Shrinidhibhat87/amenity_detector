@@ -136,7 +136,8 @@ def test_app(db_session: Session, mock_registry: ModelRegistry, tmp_path):
     app.dependency_overrides[get_db] = lambda: db_session
 
     # Override the model registry with our fake registry
-    from api.dependencies import get_model_registry
+    from api.dependencies import get_embedder, get_model_registry, get_search_pipeline
+    from core.search.pipeline import SearchPipeline
 
     app.dependency_overrides[get_model_registry] = lambda: mock_registry
 
@@ -145,8 +146,17 @@ def test_app(db_session: Session, mock_registry: ModelRegistry, tmp_path):
 
     app.dependency_overrides[get_image_storage_dir] = lambda: tmp_path / "images"
 
+    # Build a degraded SearchPipeline for tests — no LLM parser, no embedder.
+    # The regex fallback + zero-vector cosine still exercises the SQL path
+    # which is the part that matters for the integration assertions.
+    test_pipeline = SearchPipeline(parser=None, embedder=None)
+    app.dependency_overrides[get_search_pipeline] = lambda: test_pipeline
+    app.dependency_overrides[get_embedder] = lambda: None
+
     # Store the registry on app.state (the health check and startup code expect it)
     app.state.model_registry = mock_registry
+    app.state.search_pipeline = test_pipeline
+    app.state.embeddings_client = None
 
     yield app
 
