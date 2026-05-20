@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from PIL import Image
 from sqlalchemy.orm import Session
 
-from api.dependencies import get_image_storage_dir, get_model_registry
+from api.dependencies import get_embedder, get_image_storage_dir, get_model_registry
 from api.schemas import (
     DescribeRequest,
     DescribeResponse,
@@ -38,6 +38,8 @@ from api.schemas import (
 )
 from core.amenity_data_manager import AmenityDataManager
 from core.amenity_system import PropertyAmenitySystem
+from core.embeddings import EmbeddingsClient
+from core.search.pipeline import reindex_property
 from db.session import get_db
 from models.registry import ModelRegistry
 
@@ -107,6 +109,7 @@ def patch_property(
     property_id: str,
     body: PropertyUpdateRequest,
     db: Session = Depends(get_db),
+    embedder: EmbeddingsClient | None = Depends(get_embedder),
 ) -> PropertyDetailResponse:
     """
     Update one or more listing-metadata fields on an existing property.
@@ -117,6 +120,11 @@ def patch_property(
     The ``slug`` field is intentionally not patchable — keeping public URLs
     stable is the whole point of having a slug. The Pydantic schema rejects
     unknown keys with HTTP 422.
+
+    When ``description`` is among the patched fields, the property is
+    re-embedded so subsequent searches see the new text. The reindex is
+    best-effort: an embedder outage logs a warning but does not fail the
+    write.
     """
     fields = body.model_dump(exclude_unset=True)
     if not fields:
@@ -128,6 +136,15 @@ def patch_property(
         raise HTTPException(status_code=404, detail=f"Property '{property_id}' not found.")
     db.commit()
     db.refresh(updated)
+
+    if "description" in fields:
+        try:
+            reindex_property(db, embedder, property_id)
+            db.commit()
+        except Exception:
+            logger.exception("reindex_property failed for %s; continuing", property_id)
+            db.rollback()
+
     return _build_detail_response(updated)
 
 
