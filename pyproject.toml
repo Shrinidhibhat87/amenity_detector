@@ -15,6 +15,7 @@ dependencies = [
     "sqlalchemy>=2.0.0",      # ORM: defines Property, Image, DetectedAmenity tables
     "alembic>=1.13.0",        # Schema migrations (run: alembic upgrade head)
     "psycopg2-binary>=2.9.0", # PostgreSQL adapter for SQLAlchemy
+    "pgvector>=0.3.0",        # pgvector type + cosine ops for Phase 11 hybrid search
 
     # API layer — FastAPI + Uvicorn ASGI server (api/)
     "fastapi>=0.115.9",

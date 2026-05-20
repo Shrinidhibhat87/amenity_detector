@@ -33,6 +33,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from db.types import Embedding
+
 
 class Base(DeclarativeBase):
     """
@@ -103,6 +105,11 @@ class Property(Base):
     latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
     longitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
     owner_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    description_embedding: Mapped[list[float] | None] = mapped_column(
+        Embedding(),
+        nullable=True,
+    )
 
     # --- Relationships --------------------------------------------------------
     # back_populates = "property" means PropertyImage.property points back here.

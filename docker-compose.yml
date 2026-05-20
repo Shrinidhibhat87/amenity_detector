@@ -24,9 +24,12 @@
 
 services:
 
-  # ── PostgreSQL 16 ──────────────────────────────────────────────────────────
+  # ── PostgreSQL 16 + pgvector ──────────────────────────────────────────────
   db:
-    image: postgres:16-alpine  # Alpine is smaller than the default Debian image
+    # pgvector/pgvector:pg16 = upstream Postgres 16 with the `vector` extension
+    # pre-installed. Drop-in replacement for postgres:16 — same data dir layout,
+    # so the existing postgres_data volume migrates without action.
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       # These are read from your .env file (copy from .env.example)
