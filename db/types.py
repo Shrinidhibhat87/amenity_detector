@@ -40,4 +40,7 @@ class Embedding(TypeDecorator[list[float]]):
     def load_dialect_impl(self, dialect: Dialect) -> TypeEngine[Any]:
         if dialect.name == "postgresql" and _PgVector is not None:
             return dialect.type_descriptor(_PgVector(self.dimension))
-        return dialect.type_descriptor(JSON())
+        # `none_as_null=True` so a Python None becomes a SQL NULL rather than
+        # the JSON literal "null" — `IS NULL` predicates in the backfill must
+        # match the same rows on SQLite that they would on PostgreSQL.
+        return dialect.type_descriptor(JSON(none_as_null=True))
