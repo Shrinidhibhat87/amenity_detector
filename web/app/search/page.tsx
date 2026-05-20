@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ApiError, searchProperties } from '@/lib/api';
 import { parseQuery } from '@/lib/nl-parser';
+import { BackLink } from '@/components/back-link';
 import { PropertyCard } from '@/components/property-card';
 import { SearchFilterChips } from '@/components/search-filter-chips';
 
@@ -35,12 +36,15 @@ export default async function SearchPage({ searchParams }: Props) {
             <p className="font-mono text-xs uppercase tracking-[0.18em] text-ink-muted">
               Search
             </p>
-            <Link
-              href="/"
-              className="font-mono text-xs uppercase tracking-[0.18em] text-ink-muted hover:text-ink transition-colors"
-            >
-              ← Home
-            </Link>
+            <div className="flex items-center gap-4">
+              <BackLink />
+              <Link
+                href="/"
+                className="font-mono text-xs uppercase tracking-[0.18em] text-ink-muted hover:text-ink transition-colors"
+              >
+                ← Home
+              </Link>
+            </div>
           </div>
           <h1 className="font-display text-3xl text-ink">Find a place in plain English</h1>
           <p className="mt-2 text-ink-soft max-w-xl">
@@ -85,12 +89,15 @@ export default async function SearchPage({ searchParams }: Props) {
           <p className="font-mono text-xs uppercase tracking-[0.18em] text-ink-muted">
             Search
           </p>
-          <Link
-            href="/"
-            className="font-mono text-xs uppercase tracking-[0.18em] text-ink-muted hover:text-ink transition-colors"
-          >
-            ← Home
-          </Link>
+          <div className="flex items-center gap-4">
+            <BackLink />
+            <Link
+              href="/"
+              className="font-mono text-xs uppercase tracking-[0.18em] text-ink-muted hover:text-ink transition-colors"
+            >
+              ← Home
+            </Link>
+          </div>
         </div>
         <h1 className="font-display text-3xl text-ink">Results for &ldquo;{q}&rdquo;</h1>
 
