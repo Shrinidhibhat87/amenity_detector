@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ApiError, searchProperties, type ClientFilters } from '@/lib/api';
+import { ApiError, searchProperties } from '@/lib/api';
 import { parseQuery } from '@/lib/nl-parser';
 import { PropertyCard } from '@/components/property-card';
 import { SearchFilterChips } from '@/components/search-filter-chips';
@@ -20,47 +20,6 @@ export const metadata: Metadata = {
 function pickString(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return value[0] ?? '';
   return value ?? '';
-}
-
-/**
- * URL overrides take precedence over the parser. An empty string override
- * (`listing_type=`) means "user explicitly cleared this filter", so the
- * parser's value is discarded for that dimension and we leave it unset.
- * A missing param means "fall back to whatever the parser detected".
- */
-function applyOverrides(
-  parsed: ClientFilters,
-  params: Record<string, string | string[] | undefined>,
-): ClientFilters {
-  const out: ClientFilters = {};
-
-  const lt = params.listing_type;
-  if (lt === undefined) {
-    if (parsed.listing_type != null) out.listing_type = parsed.listing_type;
-  } else if (lt === 'rent' || lt === 'sale') {
-    out.listing_type = lt;
-  }
-
-  const bd = pickString(params.num_bedrooms);
-  if (bd === '' && params.num_bedrooms === undefined) {
-    if (parsed.num_bedrooms != null) out.num_bedrooms = parsed.num_bedrooms;
-  } else if (bd !== '') {
-    const n = Number(bd);
-    if (Number.isFinite(n) && n > 0) out.num_bedrooms = n;
-  }
-
-  const pm = pickString(params.price_max);
-  if (pm === '' && params.price_max === undefined) {
-    if (parsed.price_max != null) out.price_max = parsed.price_max;
-    if (parsed.currency != null) out.currency = parsed.currency;
-  } else if (pm !== '') {
-    const n = Number(pm);
-    if (Number.isFinite(n) && n > 0) out.price_max = n;
-    const curr = pickString(params.currency).toUpperCase();
-    if (curr.length === 3) out.currency = curr;
-  }
-
-  return out;
 }
 
 export default async function SearchPage({ searchParams }: Props) {
@@ -100,19 +59,16 @@ export default async function SearchPage({ searchParams }: Props) {
     );
   }
 
-  // Import the parser directly instead of fetching /api/parse: this is a
-  // Server Component, calling our own route handler would be a needless
-  // round-trip. Client-side surfaces (typeahead, etc.) still use /api/parse.
+  // The backend owns parsing now. We still run the client-side regex parser
+  // to surface filter chips so the user sees *which* signals the system
+  // pulled from their query — this is a display affordance, not a filter
+  // contract.
   const parsed = parseQuery(q);
-  const effective = applyOverrides(parsed.filters, params);
 
   let results: Awaited<ReturnType<typeof searchProperties>> = [];
   let error: string | null = null;
   try {
-    results = await searchProperties({
-      amenities: parsed.amenities,
-      filters: effective,
-    });
+    results = await searchProperties(q);
   } catch (err) {
     error =
       err instanceof ApiError
@@ -140,10 +96,10 @@ export default async function SearchPage({ searchParams }: Props) {
 
         <SearchFilterChips
           filters={{
-            listing_type: effective.listing_type,
-            num_bedrooms: effective.num_bedrooms,
-            price_max: effective.price_max,
-            currency: effective.currency,
+            listing_type: parsed.filters.listing_type,
+            num_bedrooms: parsed.filters.num_bedrooms,
+            price_max: parsed.filters.price_max,
+            currency: parsed.filters.currency,
             amenities: parsed.amenities,
             room_amenities: parsed.filters.room_amenities ?? [],
           }}
