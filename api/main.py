@@ -36,8 +36,12 @@ from api.middleware import RequestLoggingMiddleware
 from api.routers import images as images_router
 from api.routers import models as models_router
 from api.routers import properties as properties_router
+from api.routers import search as search_router
 from api.schemas import HealthResponse
+from core.embeddings import EmbeddingsClient, EmbeddingsError
 from core.logging_config import setup_logging
+from core.search.parser import QueryParser
+from core.search.pipeline import SearchPipeline
 from db.session import check_db_connection, create_tables
 from models.registry import ModelRegistry
 
@@ -81,6 +85,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     available = app.state.model_registry.available_models()
     logger.info("Model registry ready. Available models: %s", available)
 
+    # ── Search pipeline ──
+    # Parser and embedder are best-effort — missing credentials degrade the
+    # pipeline but never block startup.
+    parser: QueryParser | None
+    try:
+        parser = QueryParser.from_env()
+        logger.info("Search parser ready (LLM path active).")
+    except Exception as exc:
+        parser = None
+        logger.warning("Search parser disabled (%s); regex fallback only.", exc)
+
+    embedder: EmbeddingsClient | None
+    try:
+        embedder = EmbeddingsClient.from_env()
+        logger.info("Embeddings client ready.")
+    except EmbeddingsError as exc:
+        embedder = None
+        logger.warning("Embeddings client disabled (%s); cosine rerank skipped.", exc)
+
+    app.state.embeddings_client = embedder
+    app.state.search_pipeline = SearchPipeline(parser=parser, embedder=embedder)
+
     yield  # Server is running — handle requests here
 
     # ── SHUTDOWN ──
@@ -110,7 +136,7 @@ app = FastAPI(
 # separated origins, or "*" for permissive dev mode).
 _default_origins = [
     "http://localhost:7860",  # Gradio (host)
-    "http://localhost:3001",  # Next.js web (host)
+    "http://localhost:3001",  # Next.js web (host, Docker compose port mapping)
     "http://localhost:8000",  # API self / Swagger
     "http://web:3000",  # Next.js web (internal Docker DNS)
     "http://ui:7860",  # Gradio (internal Docker DNS)
@@ -145,6 +171,7 @@ Instrumentator().instrument(app).expose(app)
 app.include_router(properties_router.router)
 app.include_router(models_router.router)
 app.include_router(images_router.router)
+app.include_router(search_router.router)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["health"])

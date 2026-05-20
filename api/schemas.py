@@ -302,3 +302,18 @@ class DescribeResponse(BaseModel):
     """Response from the describe endpoint."""
 
     description: str
+
+
+# ── Search endpoint schemas ──────────────────────────────────────────────────
+
+
+class SearchRequest(BaseModel):
+    """Body for ``POST /api/v1/search``.
+
+    A single free-text query — the backend parses it into a structured
+    ``SearchFilter`` and runs the hybrid pipeline (SQL filter + cosine
+    rerank + FTS blend).
+    """
+
+    query: Annotated[str, StringConstraints(min_length=1, max_length=500)]
+    limit: Annotated[int, Field(ge=1, le=100)] = 20
