@@ -195,69 +195,26 @@ export async function patchProperty(
 }
 
 // ── NL search ────────────────────────────────────────────────────────────────
-// The backend currently exposes only an AND-filter on amenity names. Phase 11
-// will replace this with a hybrid endpoint (SQL WHERE on metadata +
-// (room, amenity) tuples, plus pgvector cosine rerank) and the post-filter
-// step here can be deleted. Keep the call site (`searchProperties`) as the
-// single seam that Phase 11 swaps.
+// `POST /api/v1/search` accepts a single free-text `query` field and returns
+// a ranked list of property summaries. The backend now owns parsing (LLM →
+// SearchFilter) and filtering (SQL WHERE + EXISTS) and ranking (pgvector
+// cosine + FTS blend) — the client just forwards the user's text.
+//
+// The earlier client-side post-filter (`applyClientFilters`) is gone; if the
+// backend cannot enforce a constraint, it should not appear as a filter at
+// all rather than be silently re-applied on the client.
 
-// `field?: T | undefined` (not `field?: T`) is required by
-// exactOptionalPropertyTypes. The parser emits explicit `undefined` for
-// missing values, so this shape must accept that.
-export interface ClientFilters {
-  listing_type?: 'rent' | 'sale' | undefined;
-  price_max?: number | undefined;
-  currency?: string | undefined;
-  num_bedrooms?: number | undefined;
-}
+export async function searchProperties(
+  query: string,
+  options: { limit?: number } = {},
+): Promise<PropertySummary[]> {
+  const body: Record<string, unknown> = { query };
+  if (options.limit != null) body.limit = options.limit;
 
-export interface SearchOptions {
-  amenities: string[];
-  filters: ClientFilters;
-}
-
-/**
- * Apply price / bedroom / listing_type filters to a list of summaries that
- * the backend cannot filter on yet. Pure so it can be unit-tested without
- * mocking fetch. When the filter is unset, the dimension is ignored. When a
- * property is missing a field that the filter is set on, it is dropped — a
- * filter is a positive assertion, not an "if known" suggestion.
- */
-export function applyClientFilters(
-  summaries: PropertySummary[],
-  filters: ClientFilters,
-): PropertySummary[] {
-  return summaries.filter((p) => {
-    if (filters.listing_type != null && p.listing_type !== filters.listing_type) {
-      return false;
-    }
-    if (filters.num_bedrooms != null && p.num_bedrooms !== filters.num_bedrooms) {
-      return false;
-    }
-    if (filters.price_max != null) {
-      if (p.price == null || p.price > filters.price_max) return false;
-      // Currency only constrains when both sides specify it. The parser may
-      // detect "under 1500" without a currency, in which case we treat the
-      // ceiling as currency-agnostic so the result is still useful.
-      if (filters.currency != null && p.currency !== filters.currency) return false;
-    }
-    return true;
+  return apiFetch(z.array(PropertySummary), `/api/v1/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    cache: 'no-store',
   });
-}
-
-export async function searchProperties(opts: SearchOptions): Promise<PropertySummary[]> {
-  let serverSide: PropertySummary[];
-  if (opts.amenities.length === 0) {
-    // No amenity terms — fall back to the regular paginated list so the user
-    // still sees something while the filters narrow it down.
-    serverSide = await listProperties({ limit: 100 });
-  } else {
-    const params = new URLSearchParams({ amenities: opts.amenities.join(',') });
-    serverSide = await apiFetch(
-      z.array(PropertySummary),
-      `/api/v1/properties/search?${params.toString()}`,
-      { cache: 'no-store' },
-    );
-  }
-  return applyClientFilters(serverSide, opts.filters);
 }
