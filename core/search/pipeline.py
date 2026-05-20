@@ -81,14 +81,14 @@ class SearchPipeline:
             return []
 
         filter_ = (
-            self._parser.parse(cleaned) if self._parser is not None else fallback_regex_parse(cleaned)
+            self._parser.parse(cleaned)
+            if self._parser is not None
+            else fallback_regex_parse(cleaned)
         )
 
         query_emb = self._safe_embed(filter_.free_text or cleaned)
 
-        candidates: Sequence[Property] = (
-            db.execute(build_candidate_query(filter_)).scalars().all()
-        )
+        candidates: Sequence[Property] = db.execute(build_candidate_query(filter_)).scalars().all()
         if not candidates:
             return []
 

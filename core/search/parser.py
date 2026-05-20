@@ -86,8 +86,7 @@ class QueryParser:
         api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
             raise RuntimeError(
-                "OPENROUTER_API_KEY is required to build a QueryParser; "
-                "see .env.example."
+                "OPENROUTER_API_KEY is required to build a QueryParser; see .env.example."
             )
         timeout = float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "30"))
         client = OpenAI(base_url=_OPENROUTER_BASE_URL, api_key=api_key, timeout=timeout)

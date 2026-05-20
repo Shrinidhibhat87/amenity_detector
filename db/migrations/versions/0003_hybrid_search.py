@@ -104,8 +104,7 @@ def upgrade() -> None:
         "ON property_search_doc (property_id)"
     )
     op.execute(
-        "CREATE INDEX ix_property_search_doc_tsv "
-        "ON property_search_doc USING GIN (search_tsv)"
+        "CREATE INDEX ix_property_search_doc_tsv ON property_search_doc USING GIN (search_tsv)"
     )
 
 

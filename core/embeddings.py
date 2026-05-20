@@ -122,8 +122,7 @@ def _read_env() -> _Config:
         missing.append("EMBEDDINGS_MODEL")
     if missing:
         raise EmbeddingsError(
-            f"missing required env vars: {', '.join(missing)}. "
-            "See .env.example for the full list."
+            f"missing required env vars: {', '.join(missing)}. See .env.example for the full list."
         )
     # mypy: each of the three is non-None after the guard above.
     assert base_url is not None and api_key is not None and model is not None

@@ -10,8 +10,6 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
-import pytest
-
 from core.search import RoomAmenity, SearchFilter
 from core.search.parser import QueryParser, fallback_regex_parse
 
@@ -37,7 +35,9 @@ class TestRegexFallback:
 
     def test_extracts_room_amenity_tuples(self) -> None:
         f = fallback_regex_parse("apartment with fireplace in living room")
-        assert RoomAmenity(room_type="living_room", amenity_name="fireplace") in f.required_amenities
+        assert (
+            RoomAmenity(room_type="living_room", amenity_name="fireplace") in f.required_amenities
+        )
 
     def test_extracts_bare_amenities_without_room(self) -> None:
         f = fallback_regex_parse("flat with wifi and parking")
@@ -75,9 +75,7 @@ class TestQueryParserLLM:
                 "max_bedrooms": 3,
                 "max_price": 1500.0,
                 "currency": "EUR",
-                "required_amenities": [
-                    {"room_type": "living_room", "amenity_name": "fireplace"}
-                ],
+                "required_amenities": [{"room_type": "living_room", "amenity_name": "fireplace"}],
                 "near": ["park"],
                 "free_text": "near a park",
             }
