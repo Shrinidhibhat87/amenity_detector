@@ -71,6 +71,8 @@ def test_upgrade_head_creates_full_phase9_schema(fresh_db: str) -> None:
         "latitude",
         "longitude",
         "owner_email",
+        # Hybrid search additions (0003)
+        "description_embedding",
     }
     assert expected_property_columns <= set(property_columns)
 
@@ -136,6 +138,12 @@ def test_existing_rows_survive_upgrade_with_null_phase9_fields(fresh_db: str) ->
         # Server defaults backfill on ALTER.
         assert int(img_row.is_primary) == 0
         assert int(img_row.display_order) == 0
+
+        embed_row = conn.execute(
+            text("SELECT description_embedding FROM properties WHERE id = :id"),
+            {"id": "legacy-id-0001"},
+        ).one()
+        assert embed_row.description_embedding is None
 
 
 def test_downgrade_chain_back_to_empty(fresh_db: str) -> None:
