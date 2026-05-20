@@ -117,9 +117,7 @@ class TestSearchEndpoint:
         resp = client.post("/api/v1/search", json={"query": ""})
         assert resp.status_code == 422
 
-    def test_listing_type_and_bedrooms_filter(
-        self, client: TestClient, seeded_db: Session
-    ) -> None:
+    def test_listing_type_and_bedrooms_filter(self, client: TestClient, seeded_db: Session) -> None:
         resp = client.post("/api/v1/search", json={"query": "3 bhk rent"})
         assert resp.status_code == 200
         ids = [p["id"] for p in resp.json()]
@@ -133,9 +131,7 @@ class TestSearchEndpoint:
         # 1400 EUR row excluded; 2BHK Berlin is the only EUR rent under 1000.
         assert ids == {"p-rent-2bhk-eur"}
 
-    def test_required_room_amenity_tuple(
-        self, client: TestClient, seeded_db: Session
-    ) -> None:
+    def test_required_room_amenity_tuple(self, client: TestClient, seeded_db: Session) -> None:
         resp = client.post(
             "/api/v1/search",
             json={"query": "apartment with fireplace in living room"},
@@ -150,16 +146,12 @@ class TestSearchEndpoint:
         ids = [p["id"] for p in resp.json()]
         assert ids == ["p-sale-villa"]
 
-    def test_no_match_returns_empty_list(
-        self, client: TestClient, seeded_db: Session
-    ) -> None:
+    def test_no_match_returns_empty_list(self, client: TestClient, seeded_db: Session) -> None:
         resp = client.post("/api/v1/search", json={"query": "10 bhk rent"})
         assert resp.status_code == 200
         assert resp.json() == []
 
-    def test_response_shape_matches_summary(
-        self, client: TestClient, seeded_db: Session
-    ) -> None:
+    def test_response_shape_matches_summary(self, client: TestClient, seeded_db: Session) -> None:
         resp = client.post("/api/v1/search", json={"query": "rent"})
         assert resp.status_code == 200
         for item in resp.json():

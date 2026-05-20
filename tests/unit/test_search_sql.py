@@ -75,9 +75,7 @@ class TestRequiredAmenities:
     def test_single_required_amenity_emits_exists(self) -> None:
         sql = _sql(
             SearchFilter(
-                required_amenities=[
-                    RoomAmenity(room_type="living_room", amenity_name="fireplace")
-                ]
+                required_amenities=[RoomAmenity(room_type="living_room", amenity_name="fireplace")]
             )
         )
         assert "EXISTS" in sql
@@ -88,9 +86,7 @@ class TestRequiredAmenities:
 
     def test_room_anywhere_omits_room_predicate(self) -> None:
         sql = _sql(
-            SearchFilter(
-                required_amenities=[RoomAmenity(room_type=None, amenity_name="wifi")]
-            )
+            SearchFilter(required_amenities=[RoomAmenity(room_type=None, amenity_name="wifi")])
         )
         assert "amenity_name = 'wifi'" in sql
         # No room constraint when room_type is None.

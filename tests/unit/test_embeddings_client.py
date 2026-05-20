@@ -125,9 +125,7 @@ class TestEmbedBatch:
 
     def test_embed_batch_skips_blank_strings(self) -> None:
         with patch("core.embeddings.OpenAI") as openai_ctor:
-            openai_ctor.return_value.embeddings.create.return_value = _fake_response(
-                [0.1], [0.2]
-            )
+            openai_ctor.return_value.embeddings.create.return_value = _fake_response([0.1], [0.2])
             client = EmbeddingsClient(base_url="x", api_key="x", model="m")
             vecs = client.embed_batch(["alpha", "   ", "beta"])
 
