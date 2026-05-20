@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { listProperties } from '@/lib/api';
+import { BackLink } from '@/components/back-link';
 import { PropertyCard } from '@/components/property-card';
 import { BrowseSearchBar } from '@/components/browse-search-bar';
 
@@ -24,12 +25,15 @@ export default async function BrowsePage() {
           <p className="font-mono text-xs uppercase tracking-[0.18em] text-ink-muted">
             Browse
           </p>
-          <Link
-            href="/"
-            className="font-mono text-xs uppercase tracking-[0.18em] text-ink-muted hover:text-ink transition-colors"
-          >
-            ← Home
-          </Link>
+          <div className="flex items-center gap-4">
+            <BackLink />
+            <Link
+              href="/"
+              className="font-mono text-xs uppercase tracking-[0.18em] text-ink-muted hover:text-ink transition-colors"
+            >
+              ← Home
+            </Link>
+          </div>
         </div>
         <h1 className="font-display text-3xl text-ink">Properties</h1>
         {properties.length > 0 && (
