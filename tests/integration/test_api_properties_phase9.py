@@ -208,3 +208,49 @@ class TestLegacyNullRowsStillLoad:
             "owner_email",
         ):
             assert body[field] is None, f"{field} should be None on legacy row"
+
+
+class TestGetPropertyBySlug:
+    """Slug-based lookup for the public property URLs."""
+
+    def _create(self, client: TestClient, name: str) -> dict[str, object]:
+        response = client.post(
+            "/api/v1/properties/",
+            json={"name": name, "model_name": "openai/gpt-4o-mini"},
+        )
+        assert response.status_code == 201
+        body: dict[str, object] = response.json()["property"]
+        return body
+
+    def test_returns_property_when_slug_matches(self, client: TestClient) -> None:
+        created = self._create(client, "Sachsenhausen 3BHK")
+        slug = created["slug"]
+        assert isinstance(slug, str) and len(slug) > 0
+
+        response = client.get(f"/api/v1/properties/by-slug/{slug}")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["id"] == created["id"]
+        assert body["slug"] == slug
+        assert body["name"] == "Sachsenhausen 3BHK"
+        # Detail response shape — must include images list, not just summary.
+        assert isinstance(body["images"], list)
+
+    def test_returns_404_for_unknown_slug(self, client: TestClient) -> None:
+        response = client.get("/api/v1/properties/by-slug/does-not-exist-xyz123")
+        assert response.status_code == 404
+
+    def test_distinguishes_two_listings_with_similar_names(self, client: TestClient) -> None:
+        # The auto-generated slug suffix from the UUID prefix is what keeps
+        # two listings with the same name addressable; verify each by-slug
+        # call still resolves to the right row.
+        first = self._create(client, "Same Name")
+        second = self._create(client, "Same Name")
+        assert first["slug"] != second["slug"]
+
+        first_response = client.get(f"/api/v1/properties/by-slug/{first['slug']}")
+        second_response = client.get(f"/api/v1/properties/by-slug/{second['slug']}")
+        assert first_response.status_code == 200
+        assert second_response.status_code == 200
+        assert first_response.json()["id"] == first["id"]
+        assert second_response.json()["id"] == second["id"]

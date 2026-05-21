@@ -273,6 +273,23 @@ class AmenityDataManager:
         """
         return self.db.get(Property, property_id)
 
+    def get_property_by_slug(self, slug: str) -> Property | None:
+        """
+        Fetch a single Property by its URL-safe slug.
+
+        Slugs are unique (enforced by the unique index added in
+        0002_phase9_listing_metadata) and immutable, so this lookup is the
+        canonical entry point for public listing URLs.
+
+        Args:
+            slug: Slug value to match exactly.
+
+        Returns:
+            The Property ORM object, or None if no row has that slug.
+        """
+        stmt = select(Property).where(Property.slug == slug).limit(1)
+        return self.db.scalars(stmt).one_or_none()
+
     def list_properties(self, offset: int = 0, limit: int = 20) -> list[Property]:
         """
         Return a paginated list of all properties, newest first.
