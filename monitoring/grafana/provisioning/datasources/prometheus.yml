@@ -5,7 +5,7 @@
 #   you define them in a YAML file that Grafana reads at startup. This means the
 #   Prometheus data source is always present, even after re-creating the container.
 #
-# After docker compose up you can open Grafana at http://localhost:3000 and
+# After docker compose up you can open Grafana at http://localhost:3030 and
 # immediately query Prometheus metrics without any manual setup.
 
 apiVersion: 1

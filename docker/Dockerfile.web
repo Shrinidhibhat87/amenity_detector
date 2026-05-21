@@ -1,6 +1,6 @@
 # ── Dockerfile for the Next.js (TypeScript) frontend ─────────────────────────
 #
-# Multi-stage build mirrors docker/Dockerfile.api/.ui:
+# Multi-stage build mirrors docker/Dockerfile.api:
 #   Stage 1 (deps)    — pnpm install with cached lockfile (no app code yet)
 #   Stage 2 (builder) — copy source + run `pnpm build`, producing .next/standalone
 #   Stage 3 (runner)  — copy only standalone output + static + public, run node
@@ -12,7 +12,7 @@
 #
 # Usage:
 #   Build:  docker build -f docker/Dockerfile.web -t amenity-web .
-#   Run:    docker run -p 3001:3000 -e API_BASE_URL=http://api:8000 amenity-web
+#   Run:    docker run -p 3000:3000 -e API_BASE_URL=http://api:8000 amenity-web
 
 # Pin the alpine variant so musl libc is identical across stages. The host
 # uses Node 24; we match here so locally built native modules (sharp) match.

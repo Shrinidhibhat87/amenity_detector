@@ -9,7 +9,7 @@
 import { NextResponse } from 'next/server';
 import { listProperties } from '@/lib/api';
 
-const SITE_URL = process.env['NEXT_PUBLIC_SITE_URL'] ?? 'http://localhost:3001';
+const SITE_URL = process.env['NEXT_PUBLIC_SITE_URL'] ?? 'http://localhost:3000';
 
 export async function GET(): Promise<NextResponse> {
   const properties = await listProperties({ limit: 100 });

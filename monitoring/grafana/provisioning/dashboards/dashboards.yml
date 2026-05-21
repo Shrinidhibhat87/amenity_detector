@@ -3,7 +3,7 @@
 #
 # Without this file you would have to import dashboards manually through the
 # Grafana web UI every time you recreate the container. With provisioning, the
-# dashboard appears automatically at http://localhost:3000.
+# dashboard appears automatically at http://localhost:3030.
 #
 # After docker compose up, open Grafana → Dashboards → Amenity Detector API.
 
