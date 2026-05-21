@@ -275,6 +275,36 @@ def search_properties(
     ]
 
 
+@router.get("/by-slug/{slug}", response_model=PropertyDetailResponse)
+def get_property_by_slug(
+    slug: str,
+    db: Session = Depends(get_db),
+) -> PropertyDetailResponse:
+    """
+    Get full details for a property by its URL-safe slug.
+
+    Slugs are immutable for the lifetime of a property, so this is the
+    canonical lookup for public listing URLs (sitemap, og:url, canonical
+    link). UUID-based lookup remains supported via GET /{property_id} so
+    pre-Phase 9 rows without a slug stay reachable.
+
+    Args:
+        slug: Slug to match exactly (case-sensitive).
+        db:   Database session.
+
+    Returns:
+        PropertyDetailResponse with images and nested amenity results.
+
+    Raises:
+        404: If no property with the given slug exists.
+    """
+    manager = AmenityDataManager(db)
+    prop = manager.get_property_by_slug(slug)
+    if prop is None:
+        raise HTTPException(status_code=404, detail=f"Property slug '{slug}' not found.")
+    return _build_detail_response(prop)
+
+
 @router.post("/{property_id}/describe", response_model=DescribeResponse)
 def regenerate_description(
     property_id: str,
