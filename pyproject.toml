@@ -30,11 +30,6 @@ dependencies = [
     "pandas>=2.0.0",
     "numpy>=1.25.0",
 
-    # Web UI — Gradio replaces Streamlit in Phase 3
-    # Gradio is purpose-built for ML demos: multimodal inputs, clean Python API,
-    # and it talks to our FastAPI backend via HTTP.
-    "gradio>=4.0.0",
-
     # Observability — Phase 4
     # python-json-logger formats all log output as structured JSON so log aggregators
     # (e.g., Loki, CloudWatch) can index individual fields.
@@ -87,7 +82,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 # Tell ruff which packages belong to THIS project so imports are sorted correctly.
-known-first-party = ["core", "models", "api", "db", "ui"]
+known-first-party = ["core", "models", "api", "db"]
 
 # ── Mypy: static type checking ────────────────────────────────────────────────
 [tool.mypy]
