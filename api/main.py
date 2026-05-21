@@ -130,16 +130,14 @@ app = FastAPI(
 # then RequestLoggingMiddleware logs the final status code.
 # (Starlette processes middleware in a stack: last-added = outermost wrapper)
 
-# CORS — allow the Gradio UI (port 7860), the Next.js web frontend (port 3001
-# on the host, port 3000 internally inside Docker), and the local FastAPI dev
-# tooling to call the API. Override with the `CORS_ORIGINS` env var (comma-
-# separated origins, or "*" for permissive dev mode).
+# CORS — allow the Next.js web frontend (port 3000 on both host and inside
+# Docker) and the local FastAPI dev tooling to call the API. Override with
+# the `CORS_ORIGINS` env var (comma-separated origins, or "*" for permissive
+# dev mode).
 _default_origins = [
-    "http://localhost:7860",  # Gradio (host)
-    "http://localhost:3001",  # Next.js web (host, Docker compose port mapping)
+    "http://localhost:3000",  # Next.js web (host)
     "http://localhost:8000",  # API self / Swagger
     "http://web:3000",  # Next.js web (internal Docker DNS)
-    "http://ui:7860",  # Gradio (internal Docker DNS)
 ]
 _cors_env = os.getenv("CORS_ORIGINS", "").strip()
 _cors_origins = (

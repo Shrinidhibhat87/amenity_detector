@@ -3,10 +3,9 @@
 # Services defined here:
 #   db         — PostgreSQL 16 database
 #   api        — FastAPI backend (port 8000)
-#   ui         — Gradio frontend (port 7860)        — Phase 3 (kept until web reaches parity)
-#   web        — Next.js TypeScript frontend (port 3001) — Phase A foundation
-#   prometheus — Metrics scraper (port 9090)         — Phase 4
-#   grafana    — Dashboards for Prometheus (port 3000) — Phase 4
+#   web        — Next.js TypeScript frontend (port 3000)
+#   prometheus — Metrics scraper (port 9090)
+#   grafana    — Dashboards for Prometheus (port 3030)
 #
 # How to use:
 #   Start everything:      docker compose up
@@ -15,7 +14,7 @@
 #   Destroy data too:      docker compose down -v    ← WARNING: deletes the database volume
 #   Tail API logs:         docker compose logs -f api
 #   Open a psql shell:     docker compose exec db psql -U amenity_user amenity_db
-#   Open Grafana:          http://localhost:3000  (admin / admin, change on first login)
+#   Open Grafana:          http://localhost:3030  (admin / admin, change on first login)
 #
 # Volumes:
 #   postgres_data   — persists the database between docker compose restarts
@@ -74,37 +73,16 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Gradio UI (Phase 3) ───────────────────────────────────────────────────────
-  ui:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.ui
-    restart: unless-stopped
-    ports:
-      - "7860:7860"
-    environment:
-      # Points to the FastAPI backend — "api" resolves to that service via Docker DNS
-      API_BASE_URL: http://api:8000
-      GRADIO_PORT: "7860"
-    depends_on:
-      api:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:7860/ || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-
-  # ── Next.js TypeScript frontend (replaces Gradio once feature-parity is reached) ──
-  # Runs the standalone Next.js server. Host port 3001 is used because Grafana
-  # claims 3000. The web container itself listens on 3000 internally.
+  # ── Next.js TypeScript frontend ─────────────────────────────────────────────
+  # Runs the standalone Next.js server. Host port 3000 is the Next.js default.
+  # The web container itself also listens on 3000 internally.
   web:
     build:
       context: .
       dockerfile: docker/Dockerfile.web
     restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "3000:3000"
     environment:
       # Internal Docker DNS — the web container reaches the API via the service name.
       API_BASE_URL: http://api:8000
@@ -112,7 +90,7 @@ services:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
       # Canonical origin for SEO URLs (sitemap, robots, JSON-LD). Override in
       # production with the real public domain (e.g. https://amenity.example.com).
-      NEXT_PUBLIC_SITE_URL: http://localhost:3001
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
     depends_on:
       api:
         condition: service_healthy
@@ -139,15 +117,17 @@ services:
 
   # ── Grafana (Phase 4 — dashboards) ─────────────────────────────────────────
   # Grafana visualises the Prometheus metrics.
-  # Access: http://localhost:3000  (default credentials: admin / admin)
+  # Access: http://localhost:3030  (default credentials: admin / admin)
   # On first login you will be prompted to change the password.
   # To add a Prometheus data source: Settings → Data Sources → Add → Prometheus
   #   URL: http://prometheus:9090
+  # Host port 3030 is used because Next.js (web) claims the standard 3000.
+  # Grafana itself still listens on 3000 inside the container.
   grafana:
     image: grafana/grafana:latest
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3030:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin  # Change this in production!
