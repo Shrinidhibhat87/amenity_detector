@@ -7,9 +7,25 @@ export default function robots(): MetadataRoute.Robots {
     rules: [
       {
         userAgent: '*',
-        allow: ['/', '/browse', '/properties/'],
-        // Kitchen-sink is a dev-only component showcase; detect wizard is owner-only.
-        disallow: ['/kitchen-sink', '/detect/'],
+        allow: [
+          '/',
+          '/browse',
+          '/properties/',
+          '/search',
+          // /llms.txt and /api/feed.jsonl are the two surfaces AI agents
+          // depend on. Listing them explicitly stops a future Disallow on
+          // /api/ from accidentally cutting agents off.
+          '/llms.txt',
+          '/api/feed.jsonl',
+        ],
+        disallow: [
+          // Dev-only component showcase
+          '/kitchen-sink',
+          // Owner-only upload + amenity-review wizard
+          '/detect/',
+          // Internal NL query parser; not useful to indexers
+          '/api/parse',
+        ],
       },
     ],
     sitemap: `${SITE_URL}/sitemap.xml`,
