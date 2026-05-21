@@ -4,6 +4,7 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import { ApiError, getImageUrl, getProperty, shouldUnoptimizeApiImages } from '@/lib/api';
 import type { PropertyDetail } from '@/lib/schemas';
+import { buildPropertyJsonLd } from '@/lib/json-ld';
 import { buildPropertyMetadata } from '@/lib/seo-metadata';
 import { Chip } from '@/components/ui';
 
@@ -28,55 +29,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   }
 }
 
-// ── JSON-LD builder ───────────────────────────────────────────────────────────
-// Schema.org RealEstateListing so search engines and LLM agents can understand
-// the listing structure without parsing HTML.
-
-function buildJsonLd(p: PropertyDetail): Record<string, unknown> {
-  const images = p.images.map((img) => getImageUrl(img.id));
-  const presentAmenities = p.images
-    .flatMap((img) => img.amenities.filter((a) => a.is_present).map((a) => a.amenity_name))
-    .filter((name, i, arr) => arr.indexOf(name) === i); // deduplicate
-
-  return {
-    '@context': 'https://schema.org',
-    '@type': 'RealEstateListing',
-    name: p.name,
-    ...(p.description != null && { description: p.description }),
-    ...(images.length > 0 && { image: images }),
-    ...(p.price != null && {
-      offers: {
-        '@type': 'Offer',
-        price: p.price,
-        priceCurrency: p.currency ?? 'EUR',
-      },
-    }),
-    ...(p.latitude != null &&
-      p.longitude != null && {
-        geo: {
-          '@type': 'GeoCoordinates',
-          latitude: p.latitude,
-          longitude: p.longitude,
-        },
-      }),
-    ...(presentAmenities.length > 0 && {
-      amenityFeature: presentAmenities.map((name) => ({
-        '@type': 'LocationFeatureSpecification',
-        name,
-        value: true,
-      })),
-    }),
-    ...(p.num_bedrooms != null && { numberOfRooms: p.num_bedrooms }),
-    ...(p.area_sqm != null && {
-      floorSize: {
-        '@type': 'QuantitativeValue',
-        value: p.area_sqm,
-        unitCode: 'MTK',
-      },
-    }),
-  };
-}
-
 // ── Page component ────────────────────────────────────────────────────────────
 
 export default async function PropertyDetailPage({ params }: Props) {
@@ -90,7 +42,11 @@ export default async function PropertyDetailPage({ params }: Props) {
     throw err;
   }
 
-  const jsonLd = buildJsonLd(property);
+  // buildPropertyJsonLd returns two blocks: the listing entity (Accommodation
+  // for rent, RealEstateListing for sale) and a BreadcrumbList. Both are
+  // rendered as separate <script> tags so a future per-type Google rich
+  // result does not collide with the breadcrumb trail in the SERP.
+  const jsonLdEntries = buildPropertyJsonLd(property, SITE_URL);
   const location = [property.locality, property.country_code].filter(Boolean).join(', ');
 
   // Group amenities by room — only present ones, deduplicated.
@@ -117,11 +73,16 @@ export default async function PropertyDetailPage({ params }: Props) {
 
   return (
     <>
-      {/* Inject JSON-LD structured data for SEO / LLM agents */}
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      />
+      {/* Inject JSON-LD structured data for SEO / LLM agents.
+          One <script> per schema.org entity so Google's rich-result
+          parser handles them independently. */}
+      {jsonLdEntries.map((entry, i) => (
+        <script
+          key={i}
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(entry) }}
+        />
+      ))}
 
       <main className="flex-1 px-6 py-12 max-w-5xl mx-auto w-full">
         {/* Breadcrumb */}
