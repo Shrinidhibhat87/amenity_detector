@@ -22,6 +22,7 @@
 
 import type { MetadataRoute } from 'next';
 import type { PropertySummary } from './schemas';
+import { propertyUrl } from './property-url';
 
 function isReady(p: PropertySummary): boolean {
   return p.image_count > 0;
@@ -56,7 +57,7 @@ export function buildSitemap(
   const listingEntries: MetadataRoute.Sitemap = properties
     .filter(isReady)
     .map((p) => ({
-      url: `${siteUrl}/properties/${p.id}`,
+      url: propertyUrl(p, siteUrl),
       lastModified: new Date(p.created_at),
       changeFrequency: 'weekly',
       priority: priorityFor(p),

@@ -70,7 +70,7 @@ describe('buildAccommodation', () => {
       postalCode: '60594',
       addressCountry: 'DE',
     });
-    expect(ld.url).toBe(`${SITE_URL}/properties/${p.id}`);
+    expect(ld.url).toBe(`${SITE_URL}/properties/${p.slug}`);
   });
 
   it('uses generic Accommodation when property_type is missing', () => {
@@ -188,6 +188,11 @@ describe('buildAccommodation', () => {
     ]);
   });
 
+  it('falls back to a UUID-based url when the property has no slug', () => {
+    const ld = buildAccommodation({ ...minDetail, slug: null }, SITE_URL);
+    expect(ld.url).toBe(`${SITE_URL}/properties/${minDetail.id}`);
+  });
+
   it('omits amenityFeature when no present amenities exist', () => {
     const ld = buildAccommodation(
       {
@@ -230,13 +235,13 @@ describe('buildRealEstateListing', () => {
     const ld = buildRealEstateListing(p, SITE_URL);
     expect(ld['@type']).toBe('RealEstateListing');
     expect(ld.name).toBe('Sachsenhausen Apartment');
-    expect(ld.url).toBe(`${SITE_URL}/properties/${p.id}`);
+    expect(ld.url).toBe(`${SITE_URL}/properties/${p.slug}`);
     expect(ld.offers).toEqual({
       '@type': 'Offer',
       price: 450000,
       priceCurrency: 'EUR',
       availability: 'https://schema.org/InStock',
-      url: `${SITE_URL}/properties/${p.id}`,
+      url: `${SITE_URL}/properties/${p.slug}`,
     });
   });
 
@@ -276,7 +281,9 @@ describe('buildBreadcrumbList', () => {
       item: `${SITE_URL}/browse`,
     });
     expect(ld.itemListElement[2]?.name).toBe('Frankfurt Loft');
-    expect(ld.itemListElement[2]?.item).toBe(`${SITE_URL}/properties/prop-1`);
+    expect(ld.itemListElement[2]?.item).toBe(
+      `${SITE_URL}/properties/sachsenhausen-apartment-abc123`,
+    );
   });
 });
 

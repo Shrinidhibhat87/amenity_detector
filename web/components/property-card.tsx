@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { getImageUrl, shouldUnoptimizeApiImages } from '@/lib/api';
+import { propertyPath } from '@/lib/property-url';
 import type { PropertySummary } from '@/lib/schemas';
 
 function formatPrice(
@@ -27,7 +28,6 @@ interface PropertyCardProps {
 
 export function PropertyCard({ property }: PropertyCardProps) {
   const {
-    id,
     name,
     listing_type,
     price,
@@ -49,7 +49,7 @@ export function PropertyCard({ property }: PropertyCardProps) {
 
   return (
     <Link
-      href={`/properties/${id}`}
+      href={propertyPath(property)}
       className="group block rounded-2xl overflow-hidden border border-border hover:border-border-strong transition-colors bg-surface"
     >
       {/* Thumbnail */}

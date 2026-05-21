@@ -14,6 +14,7 @@
  */
 
 import type { PropertyDetail, PropertyImage } from './schemas';
+import { propertyUrl } from './property-url';
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -175,7 +176,7 @@ export function buildAccommodation(
     '@context': 'https://schema.org',
     '@type': accommodationType(p),
     name: p.name,
-    url: `${siteUrl}/properties/${p.id}`,
+    url: propertyUrl(p, siteUrl),
   };
   if (p.description != null) ld.description = p.description;
   if (p.images.length > 0) ld.image = imageUrls(p.images, siteUrl);
@@ -198,7 +199,7 @@ export function buildRealEstateListing(
   p: PropertyDetail,
   siteUrl: string,
 ): RealEstateListing {
-  const url = `${siteUrl}/properties/${p.id}`;
+  const url = propertyUrl(p, siteUrl);
   const ld: RealEstateListing = {
     '@context': 'https://schema.org',
     '@type': 'RealEstateListing',
@@ -246,7 +247,7 @@ export function buildBreadcrumbList(
         '@type': 'ListItem',
         position: 3,
         name: p.name,
-        item: `${siteUrl}/properties/${p.id}`,
+        item: propertyUrl(p, siteUrl),
       },
     ],
   };
