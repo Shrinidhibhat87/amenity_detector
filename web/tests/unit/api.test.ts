@@ -5,7 +5,9 @@ import {
   describeProperty,
   getImageUrl,
   getProperty,
+  getPropertyBySlug,
   listModels,
+  looksLikeUuid,
   listProperties,
   patchImage,
   patchProperty,
@@ -173,6 +175,51 @@ describe('getProperty', () => {
   it('ApiError on 404 has status 404', async () => {
     mockFetch.mockResolvedValueOnce(errResponse(404));
     await expect(getProperty('missing')).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+// ── looksLikeUuid ──────────────────────────────────────────────────────────────
+
+describe('looksLikeUuid', () => {
+  it('returns true for v4 UUIDs as the database emits them', () => {
+    expect(looksLikeUuid('7624e0b4-4837-49c7-9579-ffc7f9880b5d')).toBe(true);
+  });
+
+  it('returns true regardless of letter case', () => {
+    expect(looksLikeUuid('7624E0B4-4837-49C7-9579-FFC7F9880B5D')).toBe(true);
+  });
+
+  it('returns false for slug-shaped strings', () => {
+    expect(looksLikeUuid('sachsenhausen-3bhk-abc123')).toBe(false);
+    expect(looksLikeUuid('frankfurt-loft-d4e1f2')).toBe(false);
+  });
+
+  it('returns false for empty or arbitrary text', () => {
+    expect(looksLikeUuid('')).toBe(false);
+    expect(looksLikeUuid('not-a-uuid')).toBe(false);
+    expect(looksLikeUuid('1234')).toBe(false);
+  });
+});
+
+// ── getPropertyBySlug ──────────────────────────────────────────────────────────
+
+describe('getPropertyBySlug', () => {
+  const minDetail = { ...minSummary, images: [] };
+
+  it('requests the by-slug endpoint with the slug appended', async () => {
+    mockFetch.mockResolvedValueOnce(okResponse(minDetail));
+    await getPropertyBySlug('sachsenhausen-3bhk-abc123');
+    const calledUrl = (mockFetch.mock.calls[0] as [string])[0];
+    expect(calledUrl).toBe(
+      `${BASE}/api/v1/properties/by-slug/sachsenhausen-3bhk-abc123`,
+    );
+  });
+
+  it('throws an ApiError carrying status 404 when the slug is unknown', async () => {
+    mockFetch.mockResolvedValueOnce(errResponse(404));
+    await expect(getPropertyBySlug('missing-xyz')).rejects.toMatchObject({
+      status: 404,
+    });
   });
 });
 

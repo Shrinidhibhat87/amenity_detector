@@ -125,6 +125,25 @@ export async function getProperty(id: string): Promise<PropertyDetail> {
   });
 }
 
+export async function getPropertyBySlug(slug: string): Promise<PropertyDetail> {
+  return apiFetch(PropertyDetail, `/api/v1/properties/by-slug/${slug}`, {
+    next: { revalidate: 60, tags: [`property-slug-${slug}`] },
+  });
+}
+
+// RFC 4122 v4 UUID shape — the database PKs match this exactly, but the
+// regex is intentionally version-agnostic so a future migration to v7 or
+// v6 PKs would not break URL routing.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * True if the path segment looks like a database UUID rather than a slug.
+ * Slugs are kebab-cased and never contain enough hex+hyphens to collide.
+ */
+export function looksLikeUuid(handle: string): boolean {
+  return UUID_RE.test(handle);
+}
+
 // ── Mutations ────────────────────────────────────────────────────────────────
 // All mutations run client-side (no cache) and bypass ISR.
 
