@@ -142,6 +142,76 @@ describe('buildAccommodation', () => {
     const ld = buildAccommodation({ ...minDetail, listing_type: 'rent' }, SITE_URL);
     expect(Object.values(ld)).not.toContain(null);
   });
+
+  it('emits LocationFeatureSpecification entries for present amenities, deduped', () => {
+    const ld = buildAccommodation(
+      {
+        ...minDetail,
+        listing_type: 'rent',
+        images: [
+          {
+            id: 'img-1',
+            file_path: '/1.jpg',
+            room_type: 'kitchen',
+            amenities: [
+              { id: 'a1', amenity_name: 'refrigerator', room_type: 'kitchen', is_present: true, confidence: 0.9 },
+              { id: 'a2', amenity_name: 'oven', room_type: 'kitchen', is_present: true, confidence: 0.8 },
+              { id: 'a3', amenity_name: 'sink', room_type: 'kitchen', is_present: false, confidence: 0.7 },
+            ],
+            alt_text: null,
+            caption: null,
+            is_primary: true,
+            display_order: 0,
+          },
+          {
+            id: 'img-2',
+            file_path: '/2.jpg',
+            room_type: 'living_room',
+            amenities: [
+              // Duplicate name across images should appear only once
+              { id: 'a4', amenity_name: 'refrigerator', room_type: 'kitchen', is_present: true, confidence: 0.6 },
+              { id: 'a5', amenity_name: 'fireplace', room_type: 'living_room', is_present: true, confidence: 0.95 },
+            ],
+            alt_text: null,
+            caption: null,
+            is_primary: false,
+            display_order: 1,
+          },
+        ],
+      },
+      SITE_URL,
+    );
+    expect(ld.amenityFeature).toEqual([
+      { '@type': 'LocationFeatureSpecification', name: 'refrigerator', value: true },
+      { '@type': 'LocationFeatureSpecification', name: 'oven', value: true },
+      { '@type': 'LocationFeatureSpecification', name: 'fireplace', value: true },
+    ]);
+  });
+
+  it('omits amenityFeature when no present amenities exist', () => {
+    const ld = buildAccommodation(
+      {
+        ...minDetail,
+        listing_type: 'rent',
+        images: [
+          {
+            id: 'img-1',
+            file_path: '/1.jpg',
+            room_type: 'kitchen',
+            amenities: [
+              { id: 'a1', amenity_name: 'sink', room_type: 'kitchen', is_present: false, confidence: 0.1 },
+            ],
+            alt_text: null,
+            caption: null,
+            is_primary: false,
+            display_order: 0,
+          },
+        ],
+      },
+      SITE_URL,
+    );
+    expect(ld.amenityFeature).toBeUndefined();
+  });
 });
 
 // ── buildRealEstateListing (sale path) ───────────────────────────────────────

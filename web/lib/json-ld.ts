@@ -44,6 +44,12 @@ interface Offer {
   url: string;
 }
 
+interface LocationFeatureSpecification {
+  '@type': 'LocationFeatureSpecification';
+  name: string;
+  value: boolean;
+}
+
 export interface Accommodation {
   '@context': 'https://schema.org';
   '@type': 'Accommodation' | 'Apartment' | 'House' | 'SingleFamilyResidence';
@@ -56,6 +62,7 @@ export interface Accommodation {
   numberOfRooms?: number;
   numberOfBathroomsTotal?: number;
   floorSize?: QuantitativeValue;
+  amenityFeature?: LocationFeatureSpecification[];
 }
 
 export interface RealEstateListing {
@@ -70,6 +77,7 @@ export interface RealEstateListing {
   numberOfRooms?: number;
   numberOfBathroomsTotal?: number;
   floorSize?: QuantitativeValue;
+  amenityFeature?: LocationFeatureSpecification[];
   offers?: Offer;
 }
 
@@ -126,6 +134,24 @@ function buildFloorSize(p: PropertyDetail): QuantitativeValue | undefined {
   return { '@type': 'QuantitativeValue', value: area, unitCode: 'MTK' };
 }
 
+function buildAmenityFeatures(p: PropertyDetail): LocationFeatureSpecification[] | undefined {
+  const seen = new Set<string>();
+  const features: LocationFeatureSpecification[] = [];
+  for (const img of p.images) {
+    for (const amenity of img.amenities) {
+      if (!amenity.is_present) continue;
+      if (seen.has(amenity.amenity_name)) continue;
+      seen.add(amenity.amenity_name);
+      features.push({
+        '@type': 'LocationFeatureSpecification',
+        name: amenity.amenity_name,
+        value: true,
+      });
+    }
+  }
+  return features.length > 0 ? features : undefined;
+}
+
 function accommodationType(p: PropertyDetail): Accommodation['@type'] {
   switch (p.property_type) {
     case 'apartment':
@@ -161,6 +187,8 @@ export function buildAccommodation(
   if (p.num_bathrooms != null) ld.numberOfBathroomsTotal = p.num_bathrooms;
   const floorSize = buildFloorSize(p);
   if (floorSize != null) ld.floorSize = floorSize;
+  const features = buildAmenityFeatures(p);
+  if (features != null) ld.amenityFeature = features;
   return ld;
 }
 
@@ -187,6 +215,8 @@ export function buildRealEstateListing(
   if (p.num_bathrooms != null) ld.numberOfBathroomsTotal = p.num_bathrooms;
   const floorSize = buildFloorSize(p);
   if (floorSize != null) ld.floorSize = floorSize;
+  const features = buildAmenityFeatures(p);
+  if (features != null) ld.amenityFeature = features;
   const price = toFiniteNumber(p.price);
   if (price != null) {
     ld.offers = {
