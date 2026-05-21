@@ -74,8 +74,25 @@ beforeEach(() => {
 // ── getImageUrl ────────────────────────────────────────────────────────────────
 
 describe('getImageUrl', () => {
-  it('builds the correct URL from the base URL', () => {
+  it('builds the correct URL from the public base URL', () => {
     expect(getImageUrl('img-abc-123')).toBe(`${BASE}/api/v1/images/img-abc-123`);
+  });
+
+  // Server-side render path: getImageUrl must NOT fall back to the
+  // internal API_BASE_URL because the resulting URL is embedded into HTML
+  // and consumed by the browser, which cannot resolve internal Docker DNS.
+  it('uses NEXT_PUBLIC_API_BASE_URL even when window is undefined', () => {
+    const originalWindow = globalThis.window;
+    // @ts-expect-error — emulate the Node.js RSC runtime
+    delete globalThis.window;
+    vi.stubEnv('API_BASE_URL', 'http://api:8000');
+    try {
+      expect(getImageUrl('img-rsc')).toBe(`${BASE}/api/v1/images/img-rsc`);
+    } finally {
+      globalThis.window = originalWindow;
+      vi.unstubAllEnvs();
+      vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', BASE);
+    }
   });
 });
 
