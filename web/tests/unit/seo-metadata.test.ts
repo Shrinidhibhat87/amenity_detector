@@ -68,7 +68,7 @@ describe('buildPropertyMetadata', () => {
 
   it('sets the canonical URL to the public property URL', () => {
     const m = buildPropertyMetadata(minDetail, SITE_URL);
-    expect(m.alternates?.canonical).toBe(`${SITE_URL}/properties/${minDetail.id}`);
+    expect(m.alternates?.canonical).toBe(`${SITE_URL}/properties/${minDetail.slug}`);
   });
 
   it('emits an Open Graph image array using the first image, with alt text', () => {
@@ -171,6 +171,6 @@ describe('buildPropertyMetadata', () => {
 
   it('sets the Open Graph url to the canonical URL', () => {
     const m = buildPropertyMetadata(minDetail, SITE_URL);
-    expect(m.openGraph?.url).toBe(`${SITE_URL}/properties/${minDetail.id}`);
+    expect(m.openGraph?.url).toBe(`${SITE_URL}/properties/${minDetail.slug}`);
   });
 });

@@ -10,6 +10,7 @@
 
 import type { Metadata } from 'next';
 import type { PropertyDetail } from './schemas';
+import { propertyUrl } from './property-url';
 
 function listingTypeLabel(p: PropertyDetail): string {
   if (p.listing_type === 'rent') return 'For rent';
@@ -35,7 +36,7 @@ export function buildPropertyMetadata(
   p: PropertyDetail,
   siteUrl: string,
 ): Metadata {
-  const canonical = `${siteUrl}/properties/${p.id}`;
+  const canonical = propertyUrl(p, siteUrl);
   const description = p.description ?? (synthesisedDescription(p) || 'Property listing.');
   const primary = p.images[0];
 

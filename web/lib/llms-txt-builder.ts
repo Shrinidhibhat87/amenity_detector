@@ -19,11 +19,12 @@
  */
 
 import type { PropertySummary } from './schemas';
+import { propertyUrl } from './property-url';
 
 function listingLine(p: PropertySummary, siteUrl: string): string {
   const loc = [p.locality, p.country_code].filter((s): s is string => s != null).join(', ');
   const locPart = loc.length > 0 ? ` (${loc})` : '';
-  return `- ${p.name}${locPart}: ${siteUrl}/properties/${p.id}`;
+  return `- ${p.name}${locPart}: ${propertyUrl(p, siteUrl)}`;
 }
 
 function section(title: string, lines: string[]): string[] {

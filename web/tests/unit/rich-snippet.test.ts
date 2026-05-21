@@ -113,7 +113,7 @@ describe('rich-snippet rent payload', () => {
   it('has the Google-recommended Accommodation fields populated', () => {
     expect(primary).toMatchObject({
       name: 'Sachsenhausen 3BHK Apartment',
-      url: `${SITE_URL}/properties/rent-001`,
+      url: `${SITE_URL}/properties/sachsenhausen-3bhk-abc123`,
       numberOfRooms: 3,
     });
     const addr = (primary as { address?: { addressLocality?: string; addressCountry?: string } }).address;
