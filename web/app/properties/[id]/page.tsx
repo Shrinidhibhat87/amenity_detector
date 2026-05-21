@@ -4,34 +4,25 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import { ApiError, getImageUrl, getProperty, shouldUnoptimizeApiImages } from '@/lib/api';
 import type { PropertyDetail } from '@/lib/schemas';
+import { buildPropertyMetadata } from '@/lib/seo-metadata';
 import { Chip } from '@/components/ui';
 
 // Next.js 15: params is a Promise in async Server Components.
 type Props = { params: Promise<{ id: string }> };
 
+const SITE_URL = process.env['NEXT_PUBLIC_SITE_URL'] ?? 'http://localhost:3000';
+
 // ── generateMetadata ──────────────────────────────────────────────────────────
-// Runs before the page renders. Produces <title>, <meta description>, and
-// Open Graph tags specific to this listing. Falls back gracefully if the API
-// is unreachable (avoids blocking the build).
+// Runs before the page renders. Produces <title>, <meta description>,
+// canonical URL, OpenGraph card, and Twitter card. The full metadata shape
+// is built in lib/seo-metadata.ts so it is unit-testable. Falls back to a
+// generic title if the API is unreachable so `next build` is not blocked.
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   try {
     const p = await getProperty(id);
-    const location = [p.locality, p.country_code].filter(Boolean).join(', ');
-    const typeLabel = p.listing_type === 'rent' ? 'For rent' : p.listing_type === 'sale' ? 'For sale' : '';
-    const descFallback = [typeLabel, location ? `in ${location}` : ''].filter(Boolean).join(' ');
-    const ogImage = p.images[0]?.id != null ? getImageUrl(p.images[0].id) : undefined;
-
-    return {
-      title: `${p.name} — Amenity Detector`,
-      description: p.description ?? descFallback,
-      openGraph: {
-        title: p.name,
-        description: p.description ?? descFallback,
-        ...(ogImage != null && { images: [ogImage] }),
-      },
-    };
+    return buildPropertyMetadata(p, SITE_URL);
   } catch {
     return { title: 'Property — Amenity Detector' };
   }
