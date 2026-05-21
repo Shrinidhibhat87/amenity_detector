@@ -53,9 +53,18 @@ export function getBaseUrl(): string {
   return process.env['NEXT_PUBLIC_API_BASE_URL'] ?? 'http://localhost:8000';
 }
 
-/** Returns the full URL for serving a stored property image. */
+/**
+ * Returns the full URL for serving a stored property image.
+ *
+ * Image URLs are always consumed by the browser (the `<img>` element fetches
+ * them after HTML hydration), even when the surrounding markup was rendered
+ * in a Server Component. So we always pick the public base URL —
+ * `NEXT_PUBLIC_API_BASE_URL` — rather than the internal Docker DNS name
+ * `http://api:8000`, which the browser cannot resolve.
+ */
 export function getImageUrl(imageId: string): string {
-  return `${getBaseUrl()}/api/v1/images/${imageId}`;
+  const publicBase = process.env['NEXT_PUBLIC_API_BASE_URL'] ?? 'http://localhost:8000';
+  return `${publicBase}/api/v1/images/${imageId}`;
 }
 
 /**
