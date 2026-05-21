@@ -1,17 +1,46 @@
-import { notFound } from 'next/navigation';
+import { notFound, permanentRedirect } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { ApiError, getImageUrl, getProperty, shouldUnoptimizeApiImages } from '@/lib/api';
+import {
+  ApiError,
+  getImageUrl,
+  getProperty,
+  getPropertyBySlug,
+  looksLikeUuid,
+  shouldUnoptimizeApiImages,
+} from '@/lib/api';
 import type { PropertyDetail } from '@/lib/schemas';
 import { buildPropertyJsonLd } from '@/lib/json-ld';
 import { buildPropertyMetadata } from '@/lib/seo-metadata';
 import { Chip } from '@/components/ui';
 
 // Next.js 15: params is a Promise in async Server Components.
-type Props = { params: Promise<{ id: string }> };
+// `handle` is either a database UUID (legacy bookmarks, pre-slug rows) or
+// a slug (the canonical public URL). The page disambiguates at request time.
+type Props = { params: Promise<{ handle: string }> };
 
 const SITE_URL = process.env['NEXT_PUBLIC_SITE_URL'] ?? 'http://localhost:3000';
+
+/**
+ * Resolve the URL segment to a Property, treating UUIDs and slugs alike.
+ *
+ * When the segment is a UUID and the resolved property has a slug, the
+ * caller is redirected to the slug URL (308 permanent) so search engines
+ * collapse the two URLs onto the canonical one and the share-link looks
+ * human-readable. Legacy rows without a slug stay reachable at their UUID.
+ */
+async function resolveProperty(handle: string): Promise<PropertyDetail> {
+  if (looksLikeUuid(handle)) {
+    const p = await getProperty(handle);
+    if (p.slug != null && p.slug.length > 0) {
+      // 308 — preserves method and tells the crawler this is the new home.
+      permanentRedirect(`/properties/${p.slug}`);
+    }
+    return p;
+  }
+  return getPropertyBySlug(handle);
+}
 
 // ── generateMetadata ──────────────────────────────────────────────────────────
 // Runs before the page renders. Produces <title>, <meta description>,
@@ -20,9 +49,11 @@ const SITE_URL = process.env['NEXT_PUBLIC_SITE_URL'] ?? 'http://localhost:3000';
 // generic title if the API is unreachable so `next build` is not blocked.
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { id } = await params;
+  const { handle } = await params;
   try {
-    const p = await getProperty(id);
+    const p = looksLikeUuid(handle)
+      ? await getProperty(handle)
+      : await getPropertyBySlug(handle);
     return buildPropertyMetadata(p, SITE_URL);
   } catch {
     return { title: 'Property — Amenity Detector' };
@@ -32,11 +63,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 // ── Page component ────────────────────────────────────────────────────────────
 
 export default async function PropertyDetailPage({ params }: Props) {
-  const { id } = await params;
+  const { handle } = await params;
 
   let property: PropertyDetail;
   try {
-    property = await getProperty(id);
+    property = await resolveProperty(handle);
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound();
     throw err;
