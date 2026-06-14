@@ -19,21 +19,29 @@ Why UUID as String(36)?
 import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     DateTime,
     Float,
     ForeignKey,
+    Integer,
     Numeric,
     SmallInteger,
     String,
     Text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from db.types import Embedding
+
+# JSONB on PostgreSQL (indexable, typed), plain JSON on SQLite (test path).
+# `none_as_null=True` keeps a Python None mapping to SQL NULL on both dialects.
+_JSON_DOC = JSON(none_as_null=True).with_variant(JSONB(), "postgresql")
 
 
 class Base(DeclarativeBase):
@@ -120,6 +128,14 @@ class Property(Base):
     )
     amenities: Mapped[list["DetectedAmenity"]] = relationship(
         "DetectedAmenity", back_populates="property", cascade="all, delete-orphan"
+    )
+    # One locality insight per property (the Lage blurb + nearby POIs). uselist=False
+    # because re-running enrichment replaces the single row rather than appending.
+    locality_insight: Mapped["LocalityInsight | None"] = relationship(
+        "LocalityInsight",
+        back_populates="property",
+        cascade="all, delete-orphan",
+        uselist=False,
     )
 
     def __repr__(self) -> str:
@@ -211,3 +227,92 @@ class DetectedAmenity(Base):
             f"<DetectedAmenity amenity={self.amenity_name!r} "
             f"present={self.is_present} image_id={self.image_id!r}>"
         )
+
+
+class LocalityInsight(Base):
+    """The neighbourhood enrichment result for one property.
+
+    Holds everything the locality agent produced from a free-text location:
+    the resolved coordinate, the raw nearby POIs (kept as JSON so we can render
+    them without re-querying OSM), per-category counts for quick UI/SEO use, and
+    the synthesized "Lage" blurb. ``attribution`` carries the mandatory OSM/ODbL
+    credit that must surface wherever this data is shown.
+    """
+
+    __tablename__ = "locality_insights"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+
+    # One insight per property — unique so re-running enrichment upserts in place.
+    property_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("properties.id"), nullable=False, unique=True
+    )
+
+    # The exact free-text the user entered (PIN / street / Stadtteil).
+    location_query: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Resolved by the geocoder. Nullable so a partial run still persists.
+    display_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
+    radius_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Raw POIs (list of dicts) + per-category counts ({"school": 4, ...}).
+    pois: Mapped[list[dict[str, Any]]] = mapped_column(_JSON_DOC, nullable=False, default=list)
+    category_counts: Mapped[dict[str, int]] = mapped_column(_JSON_DOC, nullable=False, default=dict)
+
+    # The synthesized neighbourhood paragraph (the Lage box).
+    blurb: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # OSM/ODbL credit — required by the data license, surfaced in UI + SEO.
+    attribution: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="© OpenStreetMap contributors"
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    property: Mapped["Property"] = relationship("Property", back_populates="locality_insight")
+
+    def __repr__(self) -> str:
+        return f"<LocalityInsight property_id={self.property_id!r} query={self.location_query!r}>"
+
+
+class GeocodeCache(Base):
+    """Persistent cache of Nominatim geocodes, keyed on the normalised query.
+
+    Geocodes don't change, so caching them in Postgres means we hit the network
+    once per distinct location string ever — keeping us inside the 1 req/s policy
+    and at $0 cost across restarts.
+    """
+
+    __tablename__ = "geocode_cache"
+
+    query_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    # bbox as [south, north, west, east].
+    bbox: Mapped[list[float]] = mapped_column(_JSON_DOC, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+
+class PoiCache(Base):
+    """Persistent cache of Overpass POI lookups, keyed on (lat, lon, radius, category)."""
+
+    __tablename__ = "poi_cache"
+
+    cache_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    pois: Mapped[list[dict[str, Any]]] = mapped_column(_JSON_DOC, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
