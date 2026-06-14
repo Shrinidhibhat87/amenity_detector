@@ -17,6 +17,7 @@ import { z } from 'zod';
 import {
   ImageDetectionResponse,
   LocalityInsight,
+  LocalityRequest,
   ModelInfo,
   PropertyCreateResponse,
   PropertyDetail,
@@ -224,36 +225,45 @@ export async function patchProperty(
 }
 
 // ── Locality enrichment ───────────────────────────────────────────────────────
-// `POST /api/v1/locality` previews enrichment for a free-text location without
-// persisting; `POST /api/v1/properties/{id}/locality` runs and persists it on a
-// property. Both return the same shape, which (minus location_query, dropped by
-// the schema) matches the nested LocalityInsight surfaced on the detail page.
+// `POST /api/v1/locality` previews enrichment for a PIN (+ optional street)
+// without persisting; `POST /api/v1/properties/{id}/locality` runs and persists
+// it on a property. Both take the same body and return the same shape, which
+// (minus location_query, dropped by the schema) matches the nested
+// LocalityInsight surfaced on the detail page.
 
-export async function previewLocality(
-  location: string,
-  radiusM?: number,
-): Promise<LocalityInsight> {
-  const body: Record<string, unknown> = { location };
-  if (radiusM != null) body.radius_m = radiusM;
+export type LocalityParams = {
+  postalCode: string;
+  street?: string;
+  countryCode?: string;
+  radiusM?: number;
+};
+
+function localityBody({ postalCode, street, countryCode, radiusM }: LocalityParams) {
+  return LocalityRequest.parse({
+    postal_code: postalCode,
+    ...(street != null && street.length > 0 ? { street } : {}),
+    ...(countryCode != null ? { country_code: countryCode } : {}),
+    ...(radiusM != null ? { radius_m: radiusM } : {}),
+  });
+}
+
+export async function previewLocality(params: LocalityParams): Promise<LocalityInsight> {
   return apiFetch(LocalityInsight, '/api/v1/locality', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(localityBody(params)),
     cache: 'no-store',
   });
 }
 
 export async function persistLocality(
   propertyId: string,
-  location: string,
-  radiusM?: number,
+  params: LocalityParams,
 ): Promise<LocalityInsight> {
-  const body: Record<string, unknown> = { location };
-  if (radiusM != null) body.radius_m = radiusM;
   return apiFetch(LocalityInsight, `/api/v1/properties/${propertyId}/locality`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(localityBody(params)),
     cache: 'no-store',
   });
 }

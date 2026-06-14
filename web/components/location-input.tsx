@@ -30,7 +30,7 @@ export function LocationInput({ propertyId }: { propertyId: string }) {
     setStatus('running');
     setError(null);
     try {
-      const result = await persistLocality(propertyId, trimmed);
+      const result = await persistLocality(propertyId, { postalCode: trimmed });
       setInsight(result);
       setStatus('done');
     } catch (err) {
