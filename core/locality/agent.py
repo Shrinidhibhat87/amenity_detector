@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, Self
 
@@ -28,6 +29,7 @@ from core.locality.gather import (
     GatheredLocality,
     clamp_radius,
     gather_locality,
+    iter_gather,
     location_label,
 )
 from core.locality.overpass import Poi
@@ -142,6 +144,63 @@ class LocalityAgent:
             )
 
         return self._to_result(gathered, self._write_blurb(gathered))
+
+    def run_streaming(
+        self,
+        *,
+        postal_code: str,
+        street: str | None = None,
+        country_code: str = "DE",
+        radius_m: int = DEFAULT_RADIUS_M,
+    ) -> Iterator[dict[str, Any]]:
+        """Same enrichment as :meth:`run`, but yielding progress events.
+
+        Emits a ``category`` event as each category completes, a ``summary`` event
+        while the blurb is written, and a final ``result`` event carrying the
+        :class:`LocalityResult`. A geocode miss yields a single ``result`` with an
+        empty payload. Geocode service errors propagate to the caller (the router
+        turns them into an ``error`` event).
+        """
+        gen = iter_gather(
+            geocode_client=self._geocode,
+            overpass_client=self._overpass,
+            postal_code=postal_code,
+            street=street,
+            country_code=country_code,
+            radius_m=radius_m,
+        )
+        gathered: GatheredLocality | None = None
+        try:
+            while True:
+                progress = next(gen)
+                yield {
+                    "type": "category",
+                    "category": progress.category,
+                    "done": progress.done,
+                    "total": progress.total,
+                    "count": progress.result.total,
+                }
+        except StopIteration as stop:
+            gathered = stop.value
+
+        if gathered is None:
+            yield {
+                "type": "result",
+                "result": LocalityResult(
+                    location_query=location_label(postal_code, street, country_code),
+                    display_name="",
+                    latitude=None,
+                    longitude=None,
+                    radius_m=clamp_radius(radius_m),
+                    pois=[],
+                    category_counts={},
+                    blurb="This location could not be found.",
+                ),
+            }
+            return
+
+        yield {"type": "summary"}
+        yield {"type": "result", "result": self._to_result(gathered, self._write_blurb(gathered))}
 
     def _write_blurb(self, gathered: GatheredLocality) -> str:
         """Ask the model for prose from the gathered summary; fall back deterministically."""

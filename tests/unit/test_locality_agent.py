@@ -172,6 +172,36 @@ def test_geocode_miss_returns_empty_result() -> None:
     assert result.blurb == "This location could not be found."
 
 
+def test_run_streaming_emits_category_then_summary_then_result() -> None:
+    agent = _make_agent(
+        _FakeOpenAI("Walkable area with supermarkets and a school."),
+        _StubGeocode(_AACHEN),
+        _StubOverpass({"school": 1, "supermarket": 4}),
+    )
+
+    events = list(agent.run_streaming(postal_code="52062", radius_m=3000))
+
+    types = [e["type"] for e in events]
+    # One category event per gathered category, then summary, then result.
+    assert types[-2:] == ["summary", "result"]
+    assert types.count("category") >= 1
+    cat_events = [e for e in events if e["type"] == "category"]
+    assert cat_events[-1]["category"] == "airport"
+    assert cat_events[0]["total"] == cat_events[-1]["done"]  # done climbs to total
+    result = events[-1]["result"]
+    assert isinstance(result, LocalityResult)
+    assert result.category_counts == {"school": 1, "supermarket": 4}
+
+
+def test_run_streaming_geocode_miss_yields_single_empty_result() -> None:
+    agent = _make_agent(_FakeOpenAI("unused"), _StubGeocode(None), _StubOverpass({}))
+
+    events = list(agent.run_streaming(postal_code="00000"))
+
+    assert [e["type"] for e in events] == ["result"]
+    assert events[0]["result"].blurb == "This location could not be found."
+
+
 def test_run_passes_structured_args_to_geocode() -> None:
     geocode = _StubGeocode(_AACHEN)
     agent = _make_agent(_FakeOpenAI("ok"), geocode, _StubOverpass({"park": 1}))

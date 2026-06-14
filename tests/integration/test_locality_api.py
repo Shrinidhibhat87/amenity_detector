@@ -40,6 +40,30 @@ class _FakeAgent:
                 "radius_m": radius_m,
             }
         )
+        return self._result(postal_code, country_code, radius_m)
+
+    def run_streaming(
+        self,
+        *,
+        postal_code: str,
+        street: str | None = None,
+        country_code: str = "DE",
+        radius_m: int = 3000,
+    ):
+        self.calls.append(
+            {
+                "postal_code": postal_code,
+                "street": street,
+                "country_code": country_code,
+                "radius_m": radius_m,
+            }
+        )
+        yield {"type": "category", "category": "school", "done": 1, "total": 2, "count": 1}
+        yield {"type": "category", "category": "airport", "done": 2, "total": 2, "count": 0}
+        yield {"type": "result", "result": self._result(postal_code, country_code, radius_m)}
+
+    @staticmethod
+    def _result(postal_code: str, country_code: str, radius_m: int) -> LocalityResult:
         return LocalityResult(
             location_query=f"{postal_code}, {country_code}",
             display_name="60311 Frankfurt am Main, Germany",
@@ -205,6 +229,63 @@ def test_detail_exposes_persisted_insight(
     assert detail["locality_insight"] is not None
     assert detail["locality_insight"]["blurb"] == "Central spot with a school nearby."
     assert "OpenStreetMap" in detail["locality_insight"]["attribution"]
+
+
+def _parse_sse(text: str) -> list[dict]:
+    import json
+
+    events = []
+    for line in text.splitlines():
+        if line.startswith("data: "):
+            events.append(json.loads(line[len("data: ") :]))
+    return events
+
+
+def test_stream_emits_progress_then_result(client: TestClient, fake_agent: _FakeAgent) -> None:
+    resp = client.post("/api/v1/locality/stream", json={"postal_code": "60311"})
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    events = _parse_sse(resp.text)
+    assert [e["type"] for e in events] == ["category", "category", "result"]
+    assert events[0]["category"] == "school"
+    assert events[1]["done"] == events[1]["total"]
+    # The result frame wraps the serialised response model.
+    assert events[-1]["data"]["transit_breakdown"] == {"bus": 12, "rail": 2}
+    assert events[-1]["data"]["pois"][0]["name"] == "Goethe-Schule"
+
+
+def test_stream_persists_final_result(
+    client: TestClient, fake_agent: _FakeAgent, db_session: Session
+) -> None:
+    prop = Property(name="Aachen flat")
+    db_session.add(prop)
+    db_session.commit()
+
+    resp = client.post(
+        f"/api/v1/properties/{prop.id}/locality/stream", json={"postal_code": "52062"}
+    )
+
+    assert resp.status_code == 200
+    insight = db_session.query(LocalityInsight).filter_by(property_id=prop.id).one()
+    assert insight.transit_breakdown == {"bus": 12, "rail": 2}
+
+
+def test_stream_upstream_failure_emits_error_frame(client: TestClient, test_app) -> None:
+    from core.locality.geocode import GeocodeError
+
+    class _FailingAgent:
+        def run_streaming(self, **_: object):
+            raise GeocodeError("Nominatim 403")
+            yield  # pragma: no cover — makes this a generator
+
+    test_app.dependency_overrides[get_locality_agent] = lambda: _FailingAgent()
+    resp = client.post("/api/v1/locality/stream", json={"postal_code": "52062"})
+
+    assert resp.status_code == 200  # stream already opened
+    events = _parse_sse(resp.text)
+    assert events[-1]["type"] == "error"
+    assert "temporarily unavailable" in events[-1]["detail"]
 
 
 def test_detail_without_insight_is_null(client: TestClient, db_session: Session) -> None:
