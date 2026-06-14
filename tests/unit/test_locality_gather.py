@@ -154,6 +154,52 @@ def test_clamp_radius_bounds() -> None:
     assert clamp_radius(DEFAULT_RADIUS_M) == DEFAULT_RADIUS_M
 
 
+class _FlakyOverpass:
+    """Raises for one category, returns a normal result for the rest."""
+
+    def __init__(self, failing: str) -> None:
+        self._failing = failing
+
+    def gather(
+        self, *, lat: float, lon: float, radius_m: int, category: str, sample_limit: int = 5
+    ) -> CategoryResult:
+        if category == self._failing:
+            raise RuntimeError("overpass timed out")
+        return CategoryResult(category=category, total=2, pois=[])
+
+
+def test_failing_category_is_isolated_not_fatal() -> None:
+    # The airport query blows up, but everyday categories still come back.
+    result = gather_locality(
+        geocode_client=_FakeGeocode(_center()),
+        overpass_client=_FlakyOverpass(failing="airport"),
+        postal_code="52062",
+    )
+    assert result is not None
+    assert result.results["airport"].total == 0  # degraded to empty
+    assert result.category_counts["school"] == 2  # the rest survived
+
+
+def test_transit_breakdown_surfaced_on_result() -> None:
+    class _TransitOverpass:
+        def gather(
+            self, *, lat: float, lon: float, radius_m: int, category: str, sample_limit: int = 5
+        ) -> CategoryResult:
+            if category == "transit":
+                return CategoryResult(
+                    category="transit", total=14, pois=[], subtype_counts={"bus": 12, "rail": 2}
+                )
+            return CategoryResult(category=category, total=0, pois=[])
+
+    result = gather_locality(
+        geocode_client=_FakeGeocode(_center()),
+        overpass_client=_TransitOverpass(),
+        postal_code="52062",
+    )
+    assert result is not None
+    assert result.transit_breakdown == {"bus": 12, "rail": 2}
+
+
 def test_geocode_called_with_structured_args() -> None:
     geocode = _FakeGeocode(_center())
     gather_locality(

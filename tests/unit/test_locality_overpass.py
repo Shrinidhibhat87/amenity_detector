@@ -216,11 +216,19 @@ def test_airport_category_maps_to_aeroway_selector() -> None:
     ("tags", "expected"),
     [
         ({"highway": "bus_stop"}, "bus"),
+        ({"bus": "yes"}, "bus"),
         ({"railway": "tram_stop"}, "tram"),
+        ({"tram": "yes"}, "tram"),
         ({"station": "subway"}, "subway"),
+        ({"subway": "yes"}, "subway"),
         ({"station": "light_rail"}, "light_rail"),
+        ({"light_rail": "yes"}, "light_rail"),
         ({"railway": "station"}, "rail"),
-        ({"public_transport": "platform"}, None),  # unclassifiable
+        ({"railway": "halt"}, "rail"),
+        ({"train": "yes"}, "rail"),
+        # A U-Bahn stop also carries railway=station — must classify as subway, not rail.
+        ({"railway": "station", "station": "subway"}, "subway"),
+        ({"public_transport": "platform"}, None),  # never guessed
     ],
 )
 def test_transit_type_classified_from_tags(tags: dict[str, str], expected: str | None) -> None:
@@ -240,3 +248,29 @@ def test_non_transit_poi_has_no_transit_type() -> None:
     pois = client.query(lat=50.1109, lon=8.6821, radius_m=1500, category="school")
 
     assert all(p.transit_type is None for p in pois)
+
+
+def test_gather_transit_reports_subtype_breakdown() -> None:
+    # A bus-only neighbourhood (like Aachen): the breakdown is all buses, no U/S.
+    elements = [
+        {"type": "node", "id": 1, "lat": 50.0, "lon": 8.0, "tags": {"highway": "bus_stop"}},
+        {"type": "node", "id": 2, "lat": 50.001, "lon": 8.0, "tags": {"highway": "bus_stop"}},
+        {"type": "node", "id": 3, "lat": 50.002, "lon": 8.0, "tags": {"railway": "station"}},
+    ]
+    session = _FakeSession([_FakeResponse(status_code=200, payload={"elements": elements})])
+    client = _make_client(session)
+
+    result = client.gather(lat=50.0, lon=8.0, radius_m=2000, category="transit")
+
+    assert result.total == 3
+    assert result.subtype_counts == {"bus": 2, "rail": 1}
+    assert "subway" not in (result.subtype_counts or {})  # never invented
+
+
+def test_gather_non_transit_has_no_subtype_breakdown() -> None:
+    session = _FakeSession([_FakeResponse(status_code=200, payload={"elements": _elements()})])
+    client = _make_client(session)
+
+    result = client.gather(lat=50.1109, lon=8.6821, radius_m=1500, category="school")
+
+    assert result.subtype_counts is None
