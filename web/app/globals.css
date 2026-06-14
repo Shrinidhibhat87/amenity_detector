@@ -91,3 +91,49 @@
   font-weight: 300;
   animation: ad-blink 1s steps(2) infinite;
 }
+
+/* Radius slider — terracotta track + thumb on the warm surface.
+   Native range needs per-engine pseudo-elements, so it lives here rather than
+   in Tailwind utilities. The filled portion is painted via a CSS variable
+   (--ad-range-fill) the component updates as the value changes. */
+.ad-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    to right,
+    var(--color-accent) 0%,
+    var(--color-accent) var(--ad-range-fill, 50%),
+    var(--color-surface-muted) var(--ad-range-fill, 50%),
+    var(--color-surface-muted) 100%
+  );
+  outline: none;
+  cursor: pointer;
+}
+.ad-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  border: 2px solid var(--color-accent);
+  box-shadow: 0 1px 3px rgba(28, 25, 23, 0.18);
+  transition: transform 0.12s var(--ease-out-app);
+}
+.ad-range::-webkit-slider-thumb:hover {
+  transform: scale(1.12);
+}
+.ad-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  border: 2px solid var(--color-accent);
+  box-shadow: 0 1px 3px rgba(28, 25, 23, 0.18);
+}
+.ad-range:focus-visible {
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { LocalityPanel } from './locality-panel';
 import type { LocalityInsight } from '@/lib/schemas';
 
@@ -34,18 +35,38 @@ const insight: LocalityInsight = {
 };
 
 describe('LocalityPanel', () => {
-  it('renders the blurb, non-zero category counts, nearest POIs and attribution', () => {
+  it('shows the radius, category rows with counts, blurb and attribution', () => {
     render(<LocalityPanel insight={insight} />);
 
+    expect(screen.getByText('within 1 km')).toBeInTheDocument();
+    expect(screen.getByText('Schools')).toBeInTheDocument();
+    expect(screen.getByText('Parks')).toBeInTheDocument();
     expect(screen.getByText(/within walking distance/)).toBeInTheDocument();
-    expect(screen.getByText('Schools: 1')).toBeInTheDocument();
-    expect(screen.getByText('Parks: 2')).toBeInTheDocument();
-    // Zero-count category is hidden.
-    expect(screen.queryByText(/Public transport:/)).not.toBeInTheDocument();
-    expect(screen.getByText('Goethe-Schule')).toBeInTheDocument();
-    // Distance formatting: metres under 1 km, km above.
-    expect(screen.getByText(/120 m/)).toBeInTheDocument();
-    expect(screen.getByText(/1\.4 km/)).toBeInTheDocument();
     expect(screen.getByText('© OpenStreetMap contributors')).toBeInTheDocument();
+    // Zero-count category is hidden.
+    expect(screen.queryByText('Public transport')).not.toBeInTheDocument();
+  });
+
+  it('expands the densest category by default and shows distances in km', () => {
+    render(<LocalityPanel insight={insight} />);
+
+    // Parks (count 2) is the densest → open by default.
+    expect(screen.getByText('Grüneburgpark')).toBeInTheDocument();
+    expect(screen.getByText('1.4 km')).toBeInTheDocument();
+    // It has more total than sampled → "+1 more nearby".
+    expect(screen.getByText('+1 more nearby')).toBeInTheDocument();
+    // The other category starts collapsed.
+    expect(screen.queryByText('Goethe-Schule')).not.toBeInTheDocument();
+  });
+
+  it('toggles a category open on click', async () => {
+    const user = userEvent.setup();
+    render(<LocalityPanel insight={insight} />);
+
+    await user.click(screen.getByRole('button', { name: /Schools/ }));
+
+    expect(screen.getByText('Goethe-Schule')).toBeInTheDocument();
+    // Metres rendered as km: 120 m → 0.1 km.
+    expect(screen.getByText('0.1 km')).toBeInTheDocument();
   });
 });
