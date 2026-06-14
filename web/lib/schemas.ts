@@ -111,8 +111,22 @@ export const LocalityPoi = z.object({
   distance_m: z.number().default(0),
   osm_type: z.string().default(''),
   osm_id: z.number().default(0),
+  // Transit subtype for the "transit" category: bus/tram/subway/light_rail/rail.
+  // null/absent for every other category (and for stops we couldn't classify,
+  // including legacy rows persisted before subtypes existed).
+  transit_type: z.string().nullish(),
 });
 export type LocalityPoi = z.infer<typeof LocalityPoi>;
+
+// Request body for the locality endpoints (mirrors api/schemas.py LocalityRequest).
+// PIN required; street optional; country defaults to DE; everyday radius 1–10 km.
+export const LocalityRequest = z.object({
+  postal_code: z.string().min(1).max(16),
+  street: z.string().max(255).optional(),
+  country_code: CountryCode.default('DE'),
+  radius_m: z.number().int().min(1000).max(10000).default(3000),
+});
+export type LocalityRequest = z.infer<typeof LocalityRequest>;
 
 export const LocalityInsight = z.object({
   display_name: z.string().nullable().default(null),

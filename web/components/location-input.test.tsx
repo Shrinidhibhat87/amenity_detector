@@ -46,7 +46,7 @@ describe('LocationInput', () => {
     await waitFor(() => {
       expect(screen.getByText('Lively central area near a school.')).toBeInTheDocument();
     });
-    expect(persistLocality).toHaveBeenCalledWith('prop-1', '60311');
+    expect(persistLocality).toHaveBeenCalledWith('prop-1', { postalCode: '60311' });
   });
 
   it('does not call the API when the input is blank', async () => {
