@@ -233,9 +233,9 @@ export async function patchProperty(
 
 export type LocalityParams = {
   postalCode: string;
-  street?: string;
-  countryCode?: string;
-  radiusM?: number;
+  street?: string | undefined;
+  countryCode?: string | undefined;
+  radiusM?: number | undefined;
 };
 
 function localityBody({ postalCode, street, countryCode, radiusM }: LocalityParams) {
@@ -266,6 +266,78 @@ export async function persistLocality(
     body: JSON.stringify(localityBody(params)),
     cache: 'no-store',
   });
+}
+
+// Progress event emitted per category while the SSE enrichment runs.
+export type LocalityProgress = { category: string; done: number; total: number; count: number };
+
+/**
+ * Streaming variant of persistLocality.
+ *
+ * Reads the `/locality/stream` SSE endpoint frame-by-frame, invoking `onProgress`
+ * as each category completes (so the caller can fill a determinate progress bar),
+ * and resolves with the final, persisted insight. An `error` frame — emitted when
+ * Nominatim/Overpass is unavailable mid-stream — rejects with an ApiError so the
+ * caller shows a real message instead of a dropped connection.
+ */
+export async function streamPersistLocality(
+  propertyId: string,
+  params: LocalityParams,
+  onProgress: (p: LocalityProgress) => void,
+): Promise<LocalityInsight> {
+  const res = await fetch(
+    `${getBaseUrl()}/api/v1/properties/${propertyId}/locality/stream`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(localityBody(params)),
+      cache: 'no-store',
+    },
+  );
+  if (!res.ok || res.body == null) {
+    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: LocalityInsight | null = null;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let sep: number;
+    while ((sep = buffer.indexOf('\n\n')) !== -1) {
+      const frame = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      const dataLine = frame.split('\n').find((l) => l.startsWith('data: '));
+      if (dataLine == null) continue;
+
+      const event = JSON.parse(dataLine.slice('data: '.length)) as {
+        type: string;
+        detail?: string;
+        data?: unknown;
+      } & Partial<LocalityProgress>;
+
+      if (event.type === 'category') {
+        onProgress({
+          category: event.category ?? '',
+          done: event.done ?? 0,
+          total: event.total ?? 0,
+          count: event.count ?? 0,
+        });
+      } else if (event.type === 'error') {
+        throw new ApiError(503, event.detail ?? 'Location lookup unavailable');
+      } else if (event.type === 'result') {
+        result = LocalityInsight.parse(event.data);
+      }
+    }
+  }
+
+  if (result == null) throw new ApiError(500, 'Stream ended without a result');
+  return result;
 }
 
 // ── NL search ────────────────────────────────────────────────────────────────

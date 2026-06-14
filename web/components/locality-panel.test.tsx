@@ -69,4 +69,31 @@ describe('LocalityPanel', () => {
     // Metres rendered as km: 120 m → 0.1 km.
     expect(screen.getByText('0.1 km')).toBeInTheDocument();
   });
+
+  it('shows the transit mode breakdown so the mix is verifiable', () => {
+    const transitInsight: LocalityInsight = {
+      ...insight,
+      category_counts: { transit: 14 },
+      transit_breakdown: { bus: 12, rail: 2 },
+      pois: [
+        {
+          category: 'transit',
+          name: 'Bushof',
+          latitude: 50.77,
+          longitude: 6.08,
+          distance_m: 190,
+          osm_type: 'node',
+          osm_id: 7,
+          transit_type: 'bus',
+        },
+      ],
+    };
+    render(<LocalityPanel insight={transitInsight} />);
+
+    // Transit is the only (densest) category → auto-open with the breakdown chips.
+    expect(screen.getByText('12 Bus')).toBeInTheDocument();
+    expect(screen.getByText('2 Rail')).toBeInTheDocument();
+    // No phantom U-Bahn/S-Bahn for a bus city.
+    expect(screen.queryByText(/U-Bahn|S-Bahn/)).not.toBeInTheDocument();
+  });
 });

@@ -135,6 +135,9 @@ export const LocalityInsight = z.object({
   radius_m: z.number().int().nullable().default(null),
   blurb: z.string().nullable().default(null),
   category_counts: z.record(z.string(), z.number()).default({}),
+  // Per-mode transit composition ({"bus": 12, "rail": 2}); null/absent for
+  // legacy rows written before subtypes existed.
+  transit_breakdown: z.record(z.string(), z.number()).nullish(),
   pois: z.array(LocalityPoi).default([]),
   attribution: z.string(),
 });

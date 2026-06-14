@@ -12,12 +12,23 @@
  */
 
 import { useState } from 'react';
-import { ApiError, persistLocality } from '@/lib/api';
+import { ApiError, streamPersistLocality, type LocalityProgress } from '@/lib/api';
 import type { LocalityInsight } from '@/lib/schemas';
 import { Button, Input, Select } from '@/components/ui';
 import { LocalityPanel } from '@/components/locality-panel';
 
 type Status = 'idle' | 'running' | 'done' | 'error';
+
+// Friendly labels for the in-progress category step (mirrors core/locality).
+const STEP_LABELS: Record<string, string> = {
+  supermarket: 'supermarkets',
+  school: 'schools',
+  gym: 'gyms',
+  park: 'parks',
+  transit: 'public transport',
+  pharmacy: 'pharmacies',
+  airport: 'airports',
+};
 
 // Countries we bias the PIN lookup to. DE leads — the target portals are German.
 const COUNTRIES = [
@@ -42,6 +53,7 @@ export function LocationInput({ propertyId }: { propertyId: string }) {
   const [status, setStatus] = useState<Status>('idle');
   const [insight, setInsight] = useState<LocalityInsight | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<LocalityProgress | null>(null);
 
   const radiusKm = radiusM / 1000;
   const fillPct = ((radiusKm - MIN_KM) / (MAX_KM - MIN_KM)) * 100;
@@ -51,13 +63,18 @@ export function LocationInput({ propertyId }: { propertyId: string }) {
     if (pin.length === 0 || status === 'running') return;
     setStatus('running');
     setError(null);
+    setProgress(null);
     try {
-      const result = await persistLocality(propertyId, {
-        postalCode: pin,
-        street: street.trim() || undefined,
-        countryCode: country,
-        radiusM,
-      });
+      const result = await streamPersistLocality(
+        propertyId,
+        {
+          postalCode: pin,
+          street: street.trim() || undefined,
+          countryCode: country,
+          radiusM,
+        },
+        (p) => setProgress(p),
+      );
       setInsight(result);
       setStatus('done');
     } catch (err) {
@@ -148,7 +165,26 @@ export function LocationInput({ propertyId }: { propertyId: string }) {
       </div>
 
       {status === 'running' && (
-        <p className="font-mono text-xs text-ink-muted">Looking up the neighbourhood…</p>
+        <div className="space-y-1.5" role="status" aria-live="polite">
+          <div className="flex items-baseline justify-between font-mono text-xs text-ink-muted">
+            <span>
+              {progress == null
+                ? 'Locating…'
+                : `Scanning ${STEP_LABELS[progress.category] ?? progress.category}…`}
+            </span>
+            {progress != null && (
+              <span className="text-ink-faint tabular-nums">
+                {progress.done}/{progress.total}
+              </span>
+            )}
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-muted">
+            <div
+              className="h-full rounded-full bg-accent transition-[width] duration-300 ease-out"
+              style={{ width: progress == null ? '8%' : `${(progress.done / progress.total) * 100}%` }}
+            />
+          </div>
+        </div>
       )}
       {status === 'error' && error != null && (
         <p className="font-mono text-xs text-err">Could not enrich location: {error}</p>
