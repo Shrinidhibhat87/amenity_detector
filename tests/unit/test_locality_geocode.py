@@ -204,3 +204,44 @@ def test_blank_query_returns_none_without_network() -> None:
 
     assert client.geocode("   ") is None
     assert session.calls == []
+
+
+def test_structured_query_sends_postalcode_and_country() -> None:
+    session = _FakeSession([_FakeResponse(status_code=200, payload=[_hit()])])
+    client = _make_client(session)
+
+    client.geocode("52062", country_code="DE")
+
+    params = session.calls[0]["params"]
+    assert params["postalcode"] == "52062"
+    assert params["countrycodes"] == "de"  # lower-cased for Nominatim
+    assert "q" not in params  # structured query, not free-text
+    assert "street" not in params  # omitted when not supplied
+
+
+def test_optional_street_is_included_when_given() -> None:
+    session = _FakeSession([_FakeResponse(status_code=200, payload=[_hit()])])
+    client = _make_client(session)
+
+    client.geocode("52062", street="Bendelstrasse", country_code="DE")
+
+    assert session.calls[0]["params"]["street"] == "Bendelstrasse"
+
+
+def test_same_pin_different_country_does_not_collide_in_cache() -> None:
+    cache = InMemoryGeocodeCache()
+    session = _FakeSession(
+        [
+            _FakeResponse(status_code=200, payload=[_hit(name="10115 Berlin, Germany")]),
+            _FakeResponse(status_code=200, payload=[_hit(name="10115 New York, USA")]),
+        ]
+    )
+    client = _make_client(session, cache=cache)
+
+    de = client.geocode("10115", country_code="DE")
+    us = client.geocode("10115", country_code="US")
+
+    assert de is not None and us is not None
+    assert "Germany" in de.display_name
+    assert "USA" in us.display_name
+    assert len(session.calls) == 2  # distinct country → distinct key → second fetch
