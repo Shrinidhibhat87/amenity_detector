@@ -121,8 +121,10 @@ function buildAddress(p: PropertyDetail): PostalAddress | undefined {
 }
 
 function buildGeo(p: PropertyDetail): GeoCoordinates | undefined {
-  const lat = toFiniteNumber(p.latitude);
-  const lng = toFiniteNumber(p.longitude);
+  // Prefer the listing's own coordinate; fall back to the locality insight's
+  // geocoded centre so a property that only gave a PIN/street still emits geo.
+  const lat = toFiniteNumber(p.latitude) ?? toFiniteNumber(p.locality_insight?.latitude);
+  const lng = toFiniteNumber(p.longitude) ?? toFiniteNumber(p.locality_insight?.longitude);
   if (lat == null || lng == null) return undefined;
   return { '@type': 'GeoCoordinates', latitude: lat, longitude: lng };
 }

@@ -122,3 +122,28 @@ def test_persist_rerun_upserts_single_row(
 def test_persist_unknown_property_returns_404(client: TestClient, fake_agent: _FakeAgent) -> None:
     resp = client.post("/api/v1/properties/does-not-exist/locality", json={"location": "60311"})
     assert resp.status_code == 404
+
+
+def test_detail_exposes_persisted_insight(
+    client: TestClient, fake_agent: _FakeAgent, db_session: Session
+) -> None:
+    prop = Property(name="Frankfurt flat")
+    db_session.add(prop)
+    db_session.commit()
+    client.post(f"/api/v1/properties/{prop.id}/locality", json={"location": "60311"})
+
+    detail = client.get(f"/api/v1/properties/{prop.id}").json()
+
+    assert detail["locality_insight"] is not None
+    assert detail["locality_insight"]["blurb"] == "Central spot with a school nearby."
+    assert "OpenStreetMap" in detail["locality_insight"]["attribution"]
+
+
+def test_detail_without_insight_is_null(client: TestClient, db_session: Session) -> None:
+    prop = Property(name="No locality yet")
+    db_session.add(prop)
+    db_session.commit()
+
+    detail = client.get(f"/api/v1/properties/{prop.id}").json()
+
+    assert detail["locality_insight"] is None
