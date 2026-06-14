@@ -34,6 +34,7 @@ from prometheus_fastapi_instrumentator import Instrumentator  # type: ignore[imp
 
 from api.middleware import RequestLoggingMiddleware
 from api.routers import images as images_router
+from api.routers import locality as locality_router
 from api.routers import models as models_router
 from api.routers import properties as properties_router
 from api.routers import search as search_router
@@ -170,6 +171,7 @@ app.include_router(properties_router.router)
 app.include_router(models_router.router)
 app.include_router(images_router.router)
 app.include_router(search_router.router)
+app.include_router(locality_router.router)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["health"])
