@@ -130,6 +130,8 @@ from the dropdown. Live pricing: https://openrouter.ai/models.
 | `GET`    | `/api/v1/properties/`                      | List properties                                       |
 | `GET`    | `/api/v1/properties/{id}`                  | Get full property details                             |
 | `POST`   | `/api/v1/search`                           | Hybrid NL search (FTS + pgvector rerank)              |
+| `POST`   | `/api/v1/locality`                         | Preview neighbourhood enrichment for a free-text location (OSM) |
+| `POST`   | `/api/v1/properties/{id}/locality`         | Run + persist locality enrichment on a property       |
 | `GET`    | `/api/v1/images/{id}`                      | Serve stored image bytes                              |
 | `PATCH`  | `/api/v1/images/{id}`                      | Update alt_text, caption, is_primary, display_order   |
 | `DELETE` | `/api/v1/properties/{id}`                  | Delete a property                                     |
