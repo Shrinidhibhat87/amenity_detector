@@ -21,7 +21,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 # ── Phase 9 listing-metadata enum-like literals ──────────────────────────────
 # These are Pydantic Literals rather than DB-native ENUMs so the same schema
@@ -347,13 +347,22 @@ class SearchRequest(BaseModel):
 class LocalityRequest(BaseModel):
     """Body for the locality endpoints.
 
-    ``location`` is one flexible free-text field — a PIN code, a street, or a
-    Stadtteil. ``radius_m`` is an optional preferred starting search radius; the
-    agent still decides the final radius and may widen on sparse results.
+    ``postal_code`` (PIN) is required; ``street`` is optional and sharpens the
+    centre within the PIN. ``country_code`` (ISO-3166 alpha-2, default DE) keeps
+    the PIN from resolving to an identical code in another country. ``radius_m``
+    is the everyday-POI search radius (1–10 km), default 3 km; airports are
+    searched separately at a fixed wide radius.
     """
 
-    location: Annotated[str, StringConstraints(min_length=1, max_length=255)]
-    radius_m: Annotated[int, Field(ge=200, le=5000)] | None = None
+    postal_code: Annotated[str, StringConstraints(min_length=1, max_length=16)]
+    street: Annotated[str, StringConstraints(max_length=255)] | None = None
+    country_code: Annotated[str, StringConstraints(min_length=2, max_length=2)] = "DE"
+    radius_m: Annotated[int, Field(ge=1000, le=10000)] = 3000
+
+    @field_validator("country_code")
+    @classmethod
+    def _upper_country(cls, value: str) -> str:
+        return value.upper()
 
 
 class PoiResponse(BaseModel):
@@ -366,6 +375,8 @@ class PoiResponse(BaseModel):
     distance_m: float
     osm_type: str
     osm_id: int
+    # Transit subtype (bus/tram/subway/light_rail/rail) for transit POIs; else None.
+    transit_type: str | None = None
 
 
 class LocalityResponse(BaseModel):
