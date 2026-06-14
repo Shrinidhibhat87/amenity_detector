@@ -1,42 +1,25 @@
-"""Unit tests for the locality tool-calling agent.
+"""Unit tests for the locality agent (blurb synthesis).
 
-The agent is driven by a *scripted* fake OpenAI client: each call to
-``chat.completions.create`` pops the next pre-baked response (a set of tool
-calls, or a finalize). The geocode + Overpass clients are lightweight stubs so
-no network is touched. We cover the happy path, the sparse-result widen path,
-the iteration cap, and a geocode-miss.
+The data gathering is now deterministic (tested in test_locality_gather.py); the
+agent's remaining job is to turn the gathered summary into prose. So these tests
+drive a fake OpenAI client whose single completion returns a blurb, with stub
+geocode + Overpass clients underneath. We cover the happy path, the deterministic
+fallback when the model errors or returns nothing, and the geocode-miss path.
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from core.locality.agent import LocalityAgent, LocalityResult
 from core.locality.geocode import GeocodeResult
-from core.locality.overpass import Poi
+from core.locality.overpass import CategoryResult, Poi
 
 
-# ── Fake OpenAI response shapes (mirror the SDK attributes the agent reads) ──
-class _FakeFunction:
-    def __init__(self, name: str, arguments: dict[str, Any]) -> None:
-        self.name = name
-        self.arguments = json.dumps(arguments)
-
-
-class _FakeToolCall:
-    def __init__(self, call_id: str, name: str, arguments: dict[str, Any]) -> None:
-        self.id = call_id
-        self.type = "function"
-        self.function = _FakeFunction(name, arguments)
-
-
+# ── Fake OpenAI (single completion → message.content) ────────────────────────
 class _FakeMessage:
-    def __init__(
-        self, *, content: str | None = None, tool_calls: list[_FakeToolCall] | None = None
-    ) -> None:
+    def __init__(self, content: str | None) -> None:
         self.content = content
-        self.tool_calls = tool_calls
 
 
 class _FakeCompletion:
@@ -45,192 +28,158 @@ class _FakeCompletion:
 
 
 class _FakeCompletions:
-    def __init__(self, scripted: list[_FakeMessage]) -> None:
-        self._scripted = list(scripted)
+    def __init__(self, content: str | None, *, raises: bool = False) -> None:
+        self._content = content
+        self._raises = raises
         self.calls: list[dict[str, Any]] = []
 
     def create(self, **kwargs: Any) -> _FakeCompletion:
         self.calls.append(kwargs)
-        if not self._scripted:
-            raise AssertionError("fake OpenAI ran out of scripted messages")
-        return _FakeCompletion(self._scripted.pop(0))
+        if self._raises:
+            raise RuntimeError("model unavailable")
+        return _FakeCompletion(_FakeMessage(self._content))
 
 
 class _FakeOpenAI:
-    def __init__(self, scripted: list[_FakeMessage]) -> None:
-        self.chat = type("Chat", (), {"completions": _FakeCompletions(scripted)})()
+    def __init__(self, content: str | None, *, raises: bool = False) -> None:
+        self.chat = type("Chat", (), {"completions": _FakeCompletions(content, raises=raises)})()
 
 
-# ── Stub OSM clients ─────────────────────────────────────────────────────────
+# ── Stub OSM clients (new structured signatures) ─────────────────────────────
 class _StubGeocode:
     def __init__(self, result: GeocodeResult | None) -> None:
         self._result = result
-        self.queries: list[str] = []
+        self.calls: list[dict[str, Any]] = []
 
-    def geocode(self, query: str) -> GeocodeResult | None:
-        self.queries.append(query)
+    def geocode(
+        self, postal_code: str, *, street: str | None = None, country_code: str = "DE"
+    ) -> GeocodeResult | None:
+        self.calls.append(
+            {"postal_code": postal_code, "street": street, "country_code": country_code}
+        )
         return self._result
 
 
 class _StubOverpass:
-    """Returns scripted POIs keyed on (category, radius)."""
+    def __init__(self, totals: dict[str, int]) -> None:
+        self._totals = totals
 
-    def __init__(self, table: dict[tuple[str, int], list[Poi]]) -> None:
-        self._table = table
-        self.calls: list[tuple[str, int]] = []
-
-    def query(
-        self, *, lat: float, lon: float, radius_m: int, category: str, limit: int = 25
-    ) -> list[Poi]:
-        self.calls.append((category, radius_m))
-        return self._table.get((category, radius_m), [])
-
-
-def _poi(category: str, name: str, dist: float) -> Poi:
-    return Poi(
-        category=category,
-        name=name,
-        latitude=50.11,
-        longitude=8.68,
-        osm_type="node",
-        osm_id=1,
-        distance_m=dist,
-        tags={},
-    )
+    def gather(
+        self, *, lat: float, lon: float, radius_m: int, category: str, sample_limit: int = 5
+    ) -> CategoryResult:
+        total = self._totals.get(category, 0)
+        pois = [
+            Poi(
+                category=category,
+                name=f"{category}-{i}",
+                latitude=lat,
+                longitude=lon,
+                osm_type="node",
+                osm_id=i,
+                distance_m=float((i + 1) * 100),
+            )
+            for i in range(min(total, sample_limit))
+        ]
+        return CategoryResult(category=category, total=total, pois=pois)
 
 
-_FRANKFURT = GeocodeResult(
-    query="60311",
-    latitude=50.1109,
-    longitude=8.6821,
-    bbox=(50.0969, 50.1249, 8.6621, 8.7021),
-    display_name="60311 Frankfurt am Main, Germany",
+_AACHEN = GeocodeResult(
+    query="de|52062",
+    latitude=50.77,
+    longitude=6.08,
+    bbox=(50.7, 50.8, 6.0, 6.1),
+    display_name="52062 Aachen, Germany",
 )
 
 
 def _make_agent(
-    scripted: list[_FakeMessage],
-    geocode: _StubGeocode,
-    overpass: _StubOverpass,
-    *,
-    max_iterations: int = 6,
-) -> tuple[LocalityAgent, _FakeOpenAI]:
-    client = _FakeOpenAI(scripted)
-    agent = LocalityAgent(
-        openai_client=client,
+    openai: _FakeOpenAI, geocode: _StubGeocode, overpass: _StubOverpass
+) -> LocalityAgent:
+    return LocalityAgent(
+        openai_client=openai,
         geocode_client=geocode,
         overpass_client=overpass,
         model="openai/gpt-4o-mini",
-        max_iterations=max_iterations,
     )
-    return agent, client
 
 
-def test_happy_path_geocode_then_pois_then_finalize() -> None:
-    geocode = _StubGeocode(_FRANKFURT)
-    overpass = _StubOverpass(
-        {
-            ("school", 1000): [_poi("school", "Goethe-Schule", 120)],
-            ("park", 1000): [_poi("park", "Stadtpark", 300), _poi("park", "Grüneburgpark", 800)],
-        }
+def test_happy_path_writes_blurb_from_gathered_counts() -> None:
+    agent = _make_agent(
+        _FakeOpenAI("Lively spot with several supermarkets and a school nearby."),
+        _StubGeocode(_AACHEN),
+        _StubOverpass({"school": 1, "supermarket": 4}),
     )
-    scripted = [
-        _FakeMessage(tool_calls=[_FakeToolCall("c1", "geocode", {"query": "60311"})]),
-        _FakeMessage(
-            tool_calls=[
-                _FakeToolCall("c2", "overpass_query", {"category": "school", "radius_m": 1000}),
-                _FakeToolCall("c3", "overpass_query", {"category": "park", "radius_m": 1000}),
-            ]
-        ),
-        _FakeMessage(
-            tool_calls=[
-                _FakeToolCall(
-                    "c4", "finalize", {"blurb": "Central spot with a school and two parks nearby."}
-                )
-            ]
-        ),
-    ]
-    agent, _ = _make_agent(scripted, geocode, overpass)
 
-    result = agent.run("60311")
+    result = agent.run(postal_code="52062", radius_m=3000)
 
     assert isinstance(result, LocalityResult)
-    assert result.latitude == 50.1109
-    assert result.display_name.startswith("60311")
-    assert result.category_counts == {"school": 1, "park": 2}
-    assert len(result.pois) == 3
-    assert "school" in result.blurb
+    assert result.latitude == 50.77
+    assert result.display_name.startswith("52062")
+    assert result.category_counts == {"school": 1, "supermarket": 4}
+    assert "supermarket" in result.blurb
     assert "OpenStreetMap" in result.attribution
 
 
-def test_widens_radius_on_sparse_results() -> None:
-    geocode = _StubGeocode(_FRANKFURT)
-    overpass = _StubOverpass(
-        {
-            ("school", 500): [],  # too tight → empty
-            ("school", 2000): [_poi("school", "Goethe-Schule", 1500)],
-        }
+def test_summary_prompt_carries_radius_in_km() -> None:
+    openai = _FakeOpenAI("ok")
+    agent = _make_agent(openai, _StubGeocode(_AACHEN), _StubOverpass({"park": 2}))
+
+    agent.run(postal_code="52062", radius_m=3000)
+
+    user_msg = openai.chat.completions.calls[0]["messages"][1]["content"]
+    assert "3 km" in user_msg  # radius rendered in km, not metres
+
+
+def test_empty_model_response_falls_back_to_deterministic_blurb() -> None:
+    agent = _make_agent(
+        _FakeOpenAI(""),  # model returns nothing
+        _StubGeocode(_AACHEN),
+        _StubOverpass({"supermarket": 3}),
     )
-    scripted = [
-        _FakeMessage(tool_calls=[_FakeToolCall("c1", "geocode", {"query": "60311"})]),
-        _FakeMessage(
-            tool_calls=[
-                _FakeToolCall("c2", "overpass_query", {"category": "school", "radius_m": 500})
-            ]
-        ),
-        _FakeMessage(
-            tool_calls=[
-                _FakeToolCall("c3", "overpass_query", {"category": "school", "radius_m": 2000})
-            ]
-        ),
-        _FakeMessage(
-            tool_calls=[_FakeToolCall("c4", "finalize", {"blurb": "School a short ride away."})]
-        ),
-    ]
-    agent, _ = _make_agent(scripted, geocode, overpass)
 
-    result = agent.run("60311")
+    result = agent.run(postal_code="52062", radius_m=2000)
 
-    assert ("school", 500) in overpass.calls
-    assert ("school", 2000) in overpass.calls
-    assert result.category_counts == {"school": 1}
+    assert result.blurb  # non-empty
+    assert "supermarkets" in result.blurb
+    assert "2 km" in result.blurb
 
 
-def test_iteration_cap_forces_a_fallback_finalize() -> None:
-    geocode = _StubGeocode(_FRANKFURT)
-    overpass = _StubOverpass({("park", 1000): [_poi("park", "Stadtpark", 100)]})
-    # The model never finalizes — it keeps asking for the same query forever.
-    never_ending = [
-        _FakeMessage(tool_calls=[_FakeToolCall("c1", "geocode", {"query": "60311"})]),
-    ] + [
-        _FakeMessage(
-            tool_calls=[
-                _FakeToolCall(f"c{i}", "overpass_query", {"category": "park", "radius_m": 1000})
-            ]
-        )
-        for i in range(2, 20)
-    ]
-    agent, _ = _make_agent(never_ending, geocode, overpass, max_iterations=4)
+def test_model_error_falls_back_to_deterministic_blurb() -> None:
+    agent = _make_agent(
+        _FakeOpenAI(None, raises=True),
+        _StubGeocode(_AACHEN),
+        _StubOverpass({"gym": 1}),
+    )
 
-    result = agent.run("60311")
+    result = agent.run(postal_code="52062")
 
-    # Agent must terminate and synthesize a non-empty fallback blurb.
-    assert isinstance(result, LocalityResult)
     assert result.blurb
-    assert result.category_counts.get("park") == 1
+    assert "gym" in result.blurb
 
 
-def test_geocode_miss_still_returns_a_result() -> None:
-    geocode = _StubGeocode(None)
-    overpass = _StubOverpass({})
-    scripted = [
-        _FakeMessage(tool_calls=[_FakeToolCall("c1", "geocode", {"query": "nowhere-xyz"})]),
-        _FakeMessage(tool_calls=[_FakeToolCall("c2", "finalize", {"blurb": "Could not locate."})]),
-    ]
-    agent, _ = _make_agent(scripted, geocode, overpass)
+def test_geocode_miss_returns_empty_result() -> None:
+    agent = _make_agent(
+        _FakeOpenAI("unused"),
+        _StubGeocode(None),
+        _StubOverpass({}),
+    )
 
-    result = agent.run("nowhere-xyz")
+    result = agent.run(postal_code="00000")
 
     assert result.latitude is None
     assert result.pois == []
-    assert result.blurb == "Could not locate."
+    assert result.category_counts == {}
+    assert result.blurb == "This location could not be found."
+
+
+def test_run_passes_structured_args_to_geocode() -> None:
+    geocode = _StubGeocode(_AACHEN)
+    agent = _make_agent(_FakeOpenAI("ok"), geocode, _StubOverpass({"park": 1}))
+
+    agent.run(postal_code="52062", street="Bendelstrasse", country_code="DE")
+
+    assert geocode.calls[0] == {
+        "postal_code": "52062",
+        "street": "Bendelstrasse",
+        "country_code": "DE",
+    }

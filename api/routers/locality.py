@@ -37,8 +37,13 @@ def preview_locality(
     body: LocalityRequest,
     agent: LocalityAgent = Depends(get_locality_agent),
 ) -> LocalityResponse:
-    """Run locality enrichment for a free-text location without persisting."""
-    result = agent.run(body.location, radius_hint=body.radius_m)
+    """Run locality enrichment for a PIN (+ optional street) without persisting."""
+    result = agent.run(
+        postal_code=body.postal_code,
+        street=body.street,
+        country_code=body.country_code,
+        radius_m=body.radius_m,
+    )
     return _to_response(result)
 
 
@@ -54,7 +59,12 @@ def persist_locality(
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {property_id!r} not found")
 
-    result = agent.run(body.location, radius_hint=body.radius_m)
+    result = agent.run(
+        postal_code=body.postal_code,
+        street=body.street,
+        country_code=body.country_code,
+        radius_m=body.radius_m,
+    )
     persist_insight(db, property_id, result)
     return _to_response(result)
 
@@ -77,6 +87,7 @@ def _to_response(result: LocalityResult) -> LocalityResponse:
                 distance_m=p.distance_m,
                 osm_type=p.osm_type,
                 osm_id=p.osm_id,
+                transit_type=p.transit_type,
             )
             for p in result.pois
         ],
