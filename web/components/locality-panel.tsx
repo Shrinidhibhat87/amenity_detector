@@ -42,6 +42,16 @@ function label(category: string): string {
   return CATEGORY_LABELS[category] ?? category;
 }
 
+// Human labels for transit sub-modes (the breakdown chips on the transit row).
+const TRANSIT_MODE_LABELS: Record<string, string> = {
+  bus: 'Bus',
+  tram: 'Tram',
+  subway: 'U-Bahn',
+  light_rail: 'S-Bahn',
+  rail: 'Rail',
+  other: 'Other',
+};
+
 /** Distances are shown in km throughout: one decimal under 10 km, whole above. */
 function formatKm(metres: number): string {
   const km = metres / 1000;
@@ -69,6 +79,7 @@ function CategoryRow({
 }) {
   const sample = poisFor(insight, category);
   const remaining = count - sample.length;
+  const breakdown = insight.transit_breakdown;
 
   return (
     <div className="border-b border-border last:border-b-0">
@@ -101,6 +112,20 @@ function CategoryRow({
 
       {open && (
         <ul className="ad-fade-up space-y-1.5 pb-3 pl-[30px] pr-1">
+          {category === 'transit' && breakdown != null && (
+            <li className="flex flex-wrap gap-1.5 pb-1">
+              {Object.entries(breakdown)
+                .sort(([, a], [, b]) => b - a)
+                .map(([mode, n]) => (
+                  <span
+                    key={mode}
+                    className="font-mono text-[11px] px-2 py-0.5 rounded-full bg-surface-alt text-ink-soft"
+                  >
+                    {n} {TRANSIT_MODE_LABELS[mode] ?? mode}
+                  </span>
+                ))}
+            </li>
+          )}
           {sample.length === 0 && (
             <li className="text-xs text-ink-muted">Names not available in OpenStreetMap.</li>
           )}

@@ -4,9 +4,9 @@ import userEvent from '@testing-library/user-event';
 import type { LocalityInsight } from '@/lib/schemas';
 
 // Mock the API module so the component never hits the network.
-const persistLocality = vi.fn();
+const streamPersistLocality = vi.fn();
 vi.mock('@/lib/api', () => ({
-  persistLocality: (...args: unknown[]) => persistLocality(...args),
+  streamPersistLocality: (...args: unknown[]) => streamPersistLocality(...args),
   ApiError: class ApiError extends Error {
     constructor(
       public status: number,
@@ -32,11 +32,11 @@ const result: LocalityInsight = {
 
 describe('LocationInput', () => {
   beforeEach(() => {
-    persistLocality.mockReset();
+    streamPersistLocality.mockReset();
   });
 
   it('persists the PIN with country and radius, then renders the blurb', async () => {
-    persistLocality.mockResolvedValue(result);
+    streamPersistLocality.mockResolvedValue(result);
     const user = userEvent.setup();
     render(<LocationInput propertyId="prop-1" />);
 
@@ -46,16 +46,20 @@ describe('LocationInput', () => {
     await waitFor(() => {
       expect(screen.getByText('Lively central area near a school.')).toBeInTheDocument();
     });
-    expect(persistLocality).toHaveBeenCalledWith('prop-1', {
-      postalCode: '60311',
-      street: undefined,
-      countryCode: 'DE',
-      radiusM: 3000,
-    });
+    expect(streamPersistLocality).toHaveBeenCalledWith(
+      'prop-1',
+      {
+        postalCode: '60311',
+        street: undefined,
+        countryCode: 'DE',
+        radiusM: 3000,
+      },
+      expect.any(Function),
+    );
   });
 
   it('forwards the chosen radius', async () => {
-    persistLocality.mockResolvedValue(result);
+    streamPersistLocality.mockResolvedValue(result);
     const user = userEvent.setup();
     render(<LocationInput propertyId="prop-1" />);
 
@@ -64,10 +68,11 @@ describe('LocationInput', () => {
     fireEvent.change(slider, { target: { value: '7' } });
     await user.click(screen.getByRole('button', { name: 'Find' }));
 
-    await waitFor(() => expect(persistLocality).toHaveBeenCalled());
-    expect(persistLocality).toHaveBeenCalledWith(
+    await waitFor(() => expect(streamPersistLocality).toHaveBeenCalled());
+    expect(streamPersistLocality).toHaveBeenCalledWith(
       'prop-1',
       expect.objectContaining({ radiusM: 7000 }),
+      expect.any(Function),
     );
   });
 
@@ -79,11 +84,11 @@ describe('LocationInput', () => {
     const button = screen.getByRole('button', { name: 'Find' });
     expect(button).toBeDisabled();
     await user.click(button);
-    expect(persistLocality).not.toHaveBeenCalled();
+    expect(streamPersistLocality).not.toHaveBeenCalled();
   });
 
   it('shows an error when enrichment fails', async () => {
-    persistLocality.mockRejectedValue(new Error('boom'));
+    streamPersistLocality.mockRejectedValue(new Error('boom'));
     const user = userEvent.setup();
     render(<LocationInput propertyId="prop-1" />);
 
