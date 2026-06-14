@@ -16,9 +16,12 @@ thin transport layer; the agent + persistence live in core/locality.
 
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Iterator
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from api.dependencies import get_db, get_locality_agent
@@ -81,6 +84,88 @@ def persist_locality(
     result = _run_agent(agent, body)
     persist_insight(db, property_id, result)
     return _to_response(result)
+
+
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    # Tell nginx/proxies not to buffer the stream, so events arrive as they happen.
+    "X-Accel-Buffering": "no",
+}
+
+
+def _sse(payload: dict[str, object]) -> str:
+    """Format one Server-Sent Event frame."""
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def _event_stream(
+    agent: LocalityAgent,
+    body: LocalityRequest,
+    *,
+    db: Session | None = None,
+    property_id: str | None = None,
+) -> Iterator[str]:
+    """Drive the agent's streaming run, emitting SSE frames for each step.
+
+    Progress events pass straight through; the final ``result`` event is persisted
+    (when a property is given) and re-serialised through the response model. A
+    geocode/Overpass failure mid-stream becomes an ``error`` frame rather than a
+    dropped connection, so the client can show a real message.
+    """
+    try:
+        for event in agent.run_streaming(
+            postal_code=body.postal_code,
+            street=body.street,
+            country_code=body.country_code,
+            radius_m=body.radius_m,
+        ):
+            if event.get("type") == "result":
+                result = event["result"]
+                if db is not None and property_id is not None:
+                    persist_insight(db, property_id, result)
+                yield _sse({"type": "result", "data": _to_response(result).model_dump(mode="json")})
+            else:
+                yield _sse(event)
+    except (GeocodeError, OverpassError) as exc:
+        logger.warning("locality stream upstream failure: %s", exc)
+        yield _sse(
+            {
+                "type": "error",
+                "detail": "Location lookup is temporarily unavailable. Please try again.",
+            }
+        )
+
+
+@router.post("/locality/stream")
+def preview_locality_stream(
+    body: LocalityRequest,
+    agent: LocalityAgent = Depends(get_locality_agent),
+) -> StreamingResponse:
+    """Streaming (SSE) preview — emits per-category progress then the final result."""
+    return StreamingResponse(
+        _event_stream(agent, body),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
+
+
+@router.post("/properties/{property_id}/locality/stream")
+def persist_locality_stream(
+    property_id: str,
+    body: LocalityRequest,
+    db: Session = Depends(get_db),
+    agent: LocalityAgent = Depends(get_locality_agent),
+) -> StreamingResponse:
+    """Streaming (SSE) enrichment that persists the final result on the property."""
+    prop = db.get(Property, property_id)
+    if prop is None:
+        raise HTTPException(status_code=404, detail=f"Property {property_id!r} not found")
+    return StreamingResponse(
+        _event_stream(agent, body, db=db, property_id=property_id),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
 
 
 def _to_response(result: LocalityResult) -> LocalityResponse:

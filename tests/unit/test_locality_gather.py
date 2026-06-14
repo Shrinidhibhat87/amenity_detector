@@ -14,8 +14,10 @@ from core.locality.gather import (
     EVERYDAY_CATEGORIES,
     MAX_RADIUS_M,
     MIN_RADIUS_M,
+    GatherProgress,
     clamp_radius,
     gather_locality,
+    iter_gather,
 )
 from core.locality.geocode import GeocodeResult
 from core.locality.overpass import CategoryResult, Poi
@@ -198,6 +200,41 @@ def test_transit_breakdown_surfaced_on_result() -> None:
     )
     assert result is not None
     assert result.transit_breakdown == {"bus": 12, "rail": 2}
+
+
+def test_iter_gather_yields_one_progress_per_category_then_returns_result() -> None:
+    gen = iter_gather(
+        geocode_client=_FakeGeocode(_center()),
+        overpass_client=_FakeOverpass(_totals()),
+        postal_code="52062",
+    )
+    progress: list[GatherProgress] = []
+    final = None
+    try:
+        while True:
+            progress.append(next(gen))
+    except StopIteration as stop:
+        final = stop.value
+
+    expected_steps = len(EVERYDAY_CATEGORIES) + 1  # + airport
+    assert len(progress) == expected_steps
+    assert [p.done for p in progress] == list(range(1, expected_steps + 1))
+    assert all(p.total == expected_steps for p in progress)
+    assert progress[-1].category == "airport"
+    assert final is not None
+    assert final.category_counts["supermarket"] == 7
+
+
+def test_iter_gather_returns_none_on_geocode_miss_without_yielding() -> None:
+    gen = iter_gather(
+        geocode_client=_FakeGeocode(None),
+        overpass_client=_FakeOverpass({}),
+        postal_code="00000",
+    )
+    yielded = list(gen)
+    assert yielded == []  # no progress emitted
+    # The generator's return value (None) is surfaced via StopIteration in a loop;
+    # list() discards it, so just assert nothing was yielded for the miss path.
 
 
 def test_geocode_called_with_structured_args() -> None:

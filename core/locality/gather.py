@@ -17,6 +17,7 @@ and only writes the prose; it no longer drives the data gathering.
 from __future__ import annotations
 
 import logging
+from collections.abc import Generator
 from dataclasses import dataclass
 from typing import Any
 
@@ -91,6 +92,64 @@ def location_label(postal_code: str, street: str | None, country_code: str) -> s
     return f"{head}, {country_code.upper()}"
 
 
+@dataclass
+class GatherProgress:
+    """One category finished — emitted by :func:`iter_gather` for progress UIs."""
+
+    category: str
+    done: int
+    total: int
+    result: CategoryResult
+
+
+def iter_gather(
+    *,
+    geocode_client: Any,
+    overpass_client: Any,
+    postal_code: str,
+    street: str | None = None,
+    country_code: str = "DE",
+    radius_m: int = DEFAULT_RADIUS_M,
+    sample_limit: int = 5,
+) -> Generator[GatherProgress, None, GatheredLocality | None]:
+    """Stream the gather one category at a time.
+
+    Yields a :class:`GatherProgress` after each category completes (so a progress
+    bar can fill determinately) and *returns* the assembled :class:`GatheredLocality`
+    via ``StopIteration.value`` — or ``None`` if the PIN could not be geocoded.
+    Geocode errors propagate to the caller; per-category Overpass failures are
+    isolated by :func:`_safe_gather`.
+    """
+    radius_m = clamp_radius(radius_m)
+    center = geocode_client.geocode(postal_code, street=street, country_code=country_code)
+    if center is None:
+        return None
+
+    steps: list[tuple[str, int]] = [(c, radius_m) for c in EVERYDAY_CATEGORIES]
+    steps.append(("airport", AIRPORT_RADIUS_M))
+    total = len(steps)
+
+    results: dict[str, CategoryResult] = {}
+    for index, (category, radius) in enumerate(steps, start=1):
+        result = _safe_gather(
+            overpass_client,
+            lat=center.latitude,
+            lon=center.longitude,
+            radius_m=radius,
+            category=category,
+            sample_limit=sample_limit,
+        )
+        results[category] = result
+        yield GatherProgress(category=category, done=index, total=total, result=result)
+
+    return GatheredLocality(
+        location_query=location_label(postal_code, street, country_code),
+        center=center,
+        radius_m=radius_m,
+        results=results,
+    )
+
+
 def gather_locality(
     *,
     geocode_client: Any,
@@ -104,35 +163,21 @@ def gather_locality(
     """Geocode the PIN, then gather every category once at a single radius.
 
     Returns ``None`` when the location cannot be geocoded. Everyday categories use
-    the clamped ``radius_m``; airports use :data:`AIRPORT_RADIUS_M`.
+    the clamped ``radius_m``; airports use :data:`AIRPORT_RADIUS_M`. This drains
+    :func:`iter_gather` for callers that don't need the per-category progress.
     """
-    radius_m = clamp_radius(radius_m)
-    center = geocode_client.geocode(postal_code, street=street, country_code=country_code)
-    if center is None:
-        return None
-
-    results: dict[str, CategoryResult] = {}
-    for category in EVERYDAY_CATEGORIES:
-        results[category] = _safe_gather(
-            overpass_client,
-            lat=center.latitude,
-            lon=center.longitude,
-            radius_m=radius_m,
-            category=category,
-            sample_limit=sample_limit,
-        )
-    results["airport"] = _safe_gather(
-        overpass_client,
-        lat=center.latitude,
-        lon=center.longitude,
-        radius_m=AIRPORT_RADIUS_M,
-        category="airport",
+    gen = iter_gather(
+        geocode_client=geocode_client,
+        overpass_client=overpass_client,
+        postal_code=postal_code,
+        street=street,
+        country_code=country_code,
+        radius_m=radius_m,
         sample_limit=sample_limit,
     )
-
-    return GatheredLocality(
-        location_query=location_label(postal_code, street, country_code),
-        center=center,
-        radius_m=radius_m,
-        results=results,
-    )
+    try:
+        while True:
+            next(gen)
+    except StopIteration as stop:
+        result: GatheredLocality | None = stop.value
+        return result
