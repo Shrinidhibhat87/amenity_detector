@@ -85,24 +85,35 @@ class CategoryResult:
 
     ``total`` is the real count at ``radius`` (NOT capped) so the UI never shows a
     cap-as-count. ``pois`` is the nearest handful for the drill-down list.
+    ``subtype_counts`` is populated for the transit category only — a breakdown of
+    the *full* set by mode (bus/tram/subway/light_rail/rail/other) so the panel can
+    show the real composition (e.g. "all buses") rather than one opaque number.
     """
 
     category: str
     total: int
     pois: list[Poi]
+    subtype_counts: dict[str, int] | None = None
 
 
 def _transit_type(tags: Mapping[str, str]) -> str | None:
-    """Classify a transit stop from its OSM tags, or None if unclear."""
-    if tags.get("highway") == "bus_stop":
-        return "bus"
-    if tags.get("railway") == "tram_stop" or tags.get("tram") == "yes":
-        return "tram"
+    """Classify a transit stop from its OSM tags, conservatively.
+
+    Order matters: a U-Bahn/S-Bahn stop also carries ``railway=station``, so the
+    specific ``station=subway`` / ``station=light_rail`` tags are checked before the
+    generic rail fallback. Anything we cannot positively identify returns None — we
+    never *guess* a mode (so a bus-only city like Aachen never shows phantom
+    U-Bahn / S-Bahn).
+    """
     if tags.get("station") == "subway" or tags.get("subway") == "yes":
         return "subway"
     if tags.get("station") == "light_rail" or tags.get("light_rail") == "yes":
         return "light_rail"
-    if tags.get("railway") == "station":
+    if tags.get("railway") == "tram_stop" or tags.get("tram") == "yes":
+        return "tram"
+    if tags.get("highway") == "bus_stop" or tags.get("bus") == "yes":
+        return "bus"
+    if tags.get("railway") in ("station", "halt") or tags.get("train") == "yes":
         return "rail"
     return None
 
@@ -228,7 +239,13 @@ class OverpassClient:
         supermarkets" while only listing the closest 5.
         """
         pois = self._all_pois(lat=lat, lon=lon, radius_m=radius_m, category=category)
-        return CategoryResult(category=category, total=len(pois), pois=pois[:sample_limit])
+        subtype_counts = _subtype_breakdown(pois) if category == "transit" else None
+        return CategoryResult(
+            category=category,
+            total=len(pois),
+            pois=pois[:sample_limit],
+            subtype_counts=subtype_counts,
+        )
 
     def _all_pois(self, *, lat: float, lon: float, radius_m: int, category: str) -> list[Poi]:
         """Full distance-sorted POI list for a category (cached, uncapped)."""
@@ -322,6 +339,15 @@ class OverpassClient:
 
 class OverpassError(RuntimeError):
     """Raised when Overpass cannot be reached after exhausting retries."""
+
+
+def _subtype_breakdown(pois: Sequence[Poi]) -> dict[str, int]:
+    """Count transit POIs by mode; unclassified stops fall under ``other``."""
+    counts: dict[str, int] = {}
+    for poi in pois:
+        key = poi.transit_type or "other"
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def _element_coord(el: Mapping[str, Any]) -> tuple[float, float] | None:

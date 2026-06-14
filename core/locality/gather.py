@@ -16,11 +16,14 @@ and only writes the prose; it no longer drives the data gathering.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from core.locality.geocode import GeocodeResult
 from core.locality.overpass import CATEGORIES, CategoryResult, Poi
+
+logger = logging.getLogger(__name__)
 
 # Radius bounds for the everyday-POI slider (metres). Default 3 km per the
 # product decision; the slider exposes 1–10 km.
@@ -38,6 +41,21 @@ EVERYDAY_CATEGORIES: tuple[str, ...] = tuple(c for c in CATEGORIES if c != "airp
 def clamp_radius(radius_m: int) -> int:
     """Clamp a requested everyday radius into the supported slider range."""
     return max(MIN_RADIUS_M, min(MAX_RADIUS_M, radius_m))
+
+
+def _safe_gather(overpass_client: Any, *, category: str, **kwargs: Any) -> CategoryResult:
+    """Gather one category, isolating failures.
+
+    A single slow or failing Overpass category (timeout, 429, the heavy airport
+    query) must not abort the whole enrichment — it degrades to an empty result
+    for that category while the rest still render. The error is logged, not raised.
+    """
+    try:
+        result: CategoryResult = overpass_client.gather(category=category, **kwargs)
+        return result
+    except Exception as exc:
+        logger.warning("overpass gather failed for category %r: %s", category, exc)
+        return CategoryResult(category=category, total=0, pois=[])
 
 
 @dataclass
@@ -60,8 +78,14 @@ class GatheredLocality:
         """The nearest-sample POIs flattened across categories (for the drill-downs)."""
         return [poi for res in self.results.values() for poi in res.pois]
 
+    @property
+    def transit_breakdown(self) -> dict[str, int] | None:
+        """Per-mode counts for the transit category (bus/tram/rail/…), or None."""
+        transit = self.results.get("transit")
+        return transit.subtype_counts if transit else None
 
-def _location_label(postal_code: str, street: str | None, country_code: str) -> str:
+
+def location_label(postal_code: str, street: str | None, country_code: str) -> str:
     """A human-readable query label kept for persistence/display."""
     head = f"{postal_code} {street}".strip() if street else postal_code
     return f"{head}, {country_code.upper()}"
@@ -89,14 +113,16 @@ def gather_locality(
 
     results: dict[str, CategoryResult] = {}
     for category in EVERYDAY_CATEGORIES:
-        results[category] = overpass_client.gather(
+        results[category] = _safe_gather(
+            overpass_client,
             lat=center.latitude,
             lon=center.longitude,
             radius_m=radius_m,
             category=category,
             sample_limit=sample_limit,
         )
-    results["airport"] = overpass_client.gather(
+    results["airport"] = _safe_gather(
+        overpass_client,
         lat=center.latitude,
         lon=center.longitude,
         radius_m=AIRPORT_RADIUS_M,
@@ -105,7 +131,7 @@ def gather_locality(
     )
 
     return GatheredLocality(
-        location_query=_location_label(postal_code, street, country_code),
+        location_query=location_label(postal_code, street, country_code),
         center=center,
         radius_m=radius_m,
         results=results,
