@@ -99,6 +99,33 @@ export const PropertySummary = ListingMetadata.extend({
 });
 export type PropertySummary = z.infer<typeof PropertySummary>;
 
+// ── Locality insight (nested on PropertyDetail) ──────────────────────────────
+// Mirrors api/schemas.py LocalityInsightSummary. The neighbourhood enrichment
+// produced by the locality agent: a written "Lage" blurb, per-category POI
+// counts, the raw nearby POIs, and the mandatory OSM attribution.
+export const LocalityPoi = z.object({
+  category: z.string(),
+  name: z.string().default(''),
+  latitude: z.number(),
+  longitude: z.number(),
+  distance_m: z.number().default(0),
+  osm_type: z.string().default(''),
+  osm_id: z.number().default(0),
+});
+export type LocalityPoi = z.infer<typeof LocalityPoi>;
+
+export const LocalityInsight = z.object({
+  display_name: z.string().nullable().default(null),
+  latitude: Latitude.nullable().default(null),
+  longitude: Longitude.nullable().default(null),
+  radius_m: z.number().int().nullable().default(null),
+  blurb: z.string().nullable().default(null),
+  category_counts: z.record(z.string(), z.number()).default({}),
+  pois: z.array(LocalityPoi).default([]),
+  attribution: z.string(),
+});
+export type LocalityInsight = z.infer<typeof LocalityInsight>;
+
 // ── PropertyDetail (single property endpoint) ────────────────────────────────
 export const PropertyDetail = ListingMetadata.extend({
   id: z.string(),
@@ -108,6 +135,8 @@ export const PropertyDetail = ListingMetadata.extend({
   extra_info: z.string().nullable(),
   created_at: z.string(),
   images: z.array(PropertyImage),
+  // Optional so existing fixtures/legacy rows without enrichment still parse.
+  locality_insight: LocalityInsight.nullable().optional(),
 });
 export type PropertyDetail = z.infer<typeof PropertyDetail>;
 

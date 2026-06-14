@@ -29,6 +29,7 @@ from api.schemas import (
     DescribeResponse,
     DetectedAmenityResponse,
     ImageDetectionResponse,
+    LocalityInsightSummary,
     PropertyCreateRequest,
     PropertyCreateResponse,
     PropertyDetailResponse,
@@ -468,6 +469,9 @@ def _build_detail_response(prop: object) -> PropertyDetailResponse:
 
     metadata = {field: getattr(prop, field) for field in _PROPERTY_METADATA_FIELDS}
 
+    insight = prop.locality_insight
+    locality = LocalityInsightSummary.model_validate(insight) if insight is not None else None
+
     return PropertyDetailResponse(
         id=prop.id,
         name=prop.name,
@@ -476,6 +480,7 @@ def _build_detail_response(prop: object) -> PropertyDetailResponse:
         extra_info=prop.extra_info,
         created_at=prop.created_at,
         images=image_responses,
+        locality_insight=locality,
         **metadata,
     )
 

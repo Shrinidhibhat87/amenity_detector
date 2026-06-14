@@ -130,6 +130,26 @@ class PropertySummaryResponse(_PropertyMetadataMixin):
     model_config = ConfigDict(from_attributes=True)
 
 
+class LocalityInsightSummary(BaseModel):
+    """The persisted locality enrichment, surfaced on the property detail.
+
+    Read straight off the ``LocalityInsight`` ORM row so the web layer can feed
+    it into JSON-LD (geo) + llms.txt and render the neighbourhood panel. ``pois``
+    stays as a list of dicts — the raw POIs as stored.
+    """
+
+    display_name: str | None = None
+    latitude: Decimal | None = None
+    longitude: Decimal | None = None
+    radius_m: int | None = None
+    blurb: str | None = None
+    category_counts: dict[str, int] = Field(default_factory=dict)
+    pois: list[dict] = Field(default_factory=list)
+    attribution: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class PropertyDetailResponse(_PropertyMetadataMixin):
     """
     Full property details including all images and detected amenities.
@@ -144,6 +164,8 @@ class PropertyDetailResponse(_PropertyMetadataMixin):
     extra_info: str | None
     created_at: datetime
     images: list[PropertyImageResponse]
+    # Nested neighbourhood enrichment (None until the locality agent has run).
+    locality_insight: LocalityInsightSummary | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

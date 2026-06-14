@@ -58,6 +58,8 @@ export function buildLlmsTxt(properties: PropertySummary[], siteUrl: string): st
     'Rental listings use schema.org Accommodation (or Apartment / House / SingleFamilyResidence subtypes).',
     'Sale listings use schema.org RealEstateListing with an Offer block (price, currency, availability).',
     'Both include a BreadcrumbList. Detected amenities surface as amenityFeature[] of LocationFeatureSpecification entries.',
+    'Listings may also carry a neighbourhood ("Lage") blurb and nearby-POI counts by category (schools, gyms, supermarkets, parks, public transport, pharmacies), with the listing geo coordinate in GeoCoordinates.',
+    'Neighbourhood and nearby-POI data is © OpenStreetMap contributors (ODbL).',
     'Agents that read JSON-LD do not need to parse the surrounding HTML.',
     ...section('Rentals', rent.map((p) => listingLine(p, siteUrl))),
     ...section('For sale', sale.map((p) => listingLine(p, siteUrl))),
