@@ -14,6 +14,7 @@ import pytest
 
 from core.locality.overpass import (
     CATEGORIES,
+    CategoryResult,
     InMemoryPoiCache,
     OverpassClient,
     Poi,
@@ -172,3 +173,70 @@ def test_result_count_is_capped() -> None:
     pois = client.query(lat=50.0, lon=8.0, radius_m=5000, category="park", limit=10)
 
     assert len(pois) == 10
+
+
+def test_gather_reports_true_total_with_capped_sample() -> None:
+    # 30 parks within radius: the sample is capped at 5, but total stays honest at 30.
+    many = [
+        {"type": "node", "id": i, "lat": 50.0 + i * 0.0005, "lon": 8.0, "tags": {"leisure": "park"}}
+        for i in range(30)
+    ]
+    session = _FakeSession([_FakeResponse(status_code=200, payload={"elements": many})])
+    client = _make_client(session)
+
+    result = client.gather(lat=50.0, lon=8.0, radius_m=3000, category="park", sample_limit=5)
+
+    assert isinstance(result, CategoryResult)
+    assert result.total == 30  # NOT capped at the sample size
+    assert len(result.pois) == 5
+    assert result.pois[0].distance_m <= result.pois[-1].distance_m  # nearest-first
+
+
+def test_gather_shares_cache_with_query() -> None:
+    cache = InMemoryPoiCache()
+    session = _FakeSession([_FakeResponse(status_code=200, payload={"elements": _elements()})])
+    client = _make_client(session, cache=cache)
+
+    client.gather(lat=50.1109, lon=8.6821, radius_m=1500, category="school")
+    client.query(lat=50.1109, lon=8.6821, radius_m=1500, category="school")
+
+    assert len(session.calls) == 1  # second call served from cache
+
+
+def test_airport_category_maps_to_aeroway_selector() -> None:
+    session = _FakeSession([_FakeResponse(status_code=200, payload={"elements": []})])
+    client = _make_client(session)
+
+    client.query(lat=50.0, lon=8.0, radius_m=50000, category="airport")
+
+    assert '"aeroway"="aerodrome"' in session.calls[0]["data"]["data"]
+
+
+@pytest.mark.parametrize(
+    ("tags", "expected"),
+    [
+        ({"highway": "bus_stop"}, "bus"),
+        ({"railway": "tram_stop"}, "tram"),
+        ({"station": "subway"}, "subway"),
+        ({"station": "light_rail"}, "light_rail"),
+        ({"railway": "station"}, "rail"),
+        ({"public_transport": "platform"}, None),  # unclassifiable
+    ],
+)
+def test_transit_type_classified_from_tags(tags: dict[str, str], expected: str | None) -> None:
+    element = {"type": "node", "id": 1, "lat": 50.0, "lon": 8.0, "tags": tags}
+    session = _FakeSession([_FakeResponse(status_code=200, payload={"elements": [element]})])
+    client = _make_client(session)
+
+    pois = client.query(lat=50.0, lon=8.0, radius_m=1000, category="transit")
+
+    assert pois[0].transit_type == expected
+
+
+def test_non_transit_poi_has_no_transit_type() -> None:
+    session = _FakeSession([_FakeResponse(status_code=200, payload={"elements": _elements()})])
+    client = _make_client(session)
+
+    pois = client.query(lat=50.1109, lon=8.6821, radius_m=1500, category="school")
+
+    assert all(p.transit_type is None for p in pois)

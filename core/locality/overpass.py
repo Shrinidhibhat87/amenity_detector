@@ -55,6 +55,7 @@ CATEGORY_FILTERS: dict[str, tuple[tuple[str, str], ...]] = {
         ("station", "subway"),
     ),
     "pharmacy": (("amenity", "pharmacy"),),
+    "airport": (("aeroway", "aerodrome"),),
 }
 
 # Public tuple of advertised categories.
@@ -72,7 +73,38 @@ class Poi:
     osm_type: str  # "node" | "way" | "relation"
     osm_id: int
     distance_m: float
+    # For transit POIs: "bus" | "tram" | "subway" | "light_rail" | "rail".
+    # None for every other category (and for transit stops we can't classify).
+    transit_type: str | None = None
     tags: Mapping[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CategoryResult:
+    """A category's nearby POIs at a fixed radius: the true total + a nearest sample.
+
+    ``total`` is the real count at ``radius`` (NOT capped) so the UI never shows a
+    cap-as-count. ``pois`` is the nearest handful for the drill-down list.
+    """
+
+    category: str
+    total: int
+    pois: list[Poi]
+
+
+def _transit_type(tags: Mapping[str, str]) -> str | None:
+    """Classify a transit stop from its OSM tags, or None if unclear."""
+    if tags.get("highway") == "bus_stop":
+        return "bus"
+    if tags.get("railway") == "tram_stop" or tags.get("tram") == "yes":
+        return "tram"
+    if tags.get("station") == "subway" or tags.get("subway") == "yes":
+        return "subway"
+    if tags.get("station") == "light_rail" or tags.get("light_rail") == "yes":
+        return "light_rail"
+    if tags.get("railway") == "station":
+        return "rail"
+    return None
 
 
 @runtime_checkable
@@ -178,6 +210,28 @@ class OverpassClient:
         limit: int = _DEFAULT_LIMIT,
     ) -> list[Poi]:
         """Return nearby POIs in ``category``, nearest-first, capped at ``limit``."""
+        return self._all_pois(lat=lat, lon=lon, radius_m=radius_m, category=category)[:limit]
+
+    def gather(
+        self,
+        *,
+        lat: float,
+        lon: float,
+        radius_m: int,
+        category: str,
+        sample_limit: int = 5,
+    ) -> CategoryResult:
+        """Return the true count at ``radius_m`` plus the ``sample_limit`` nearest POIs.
+
+        The count is honest — it is the full number of matches within the radius,
+        not the length of the (capped) sample list — so the panel can show "12
+        supermarkets" while only listing the closest 5.
+        """
+        pois = self._all_pois(lat=lat, lon=lon, radius_m=radius_m, category=category)
+        return CategoryResult(category=category, total=len(pois), pois=pois[:sample_limit])
+
+    def _all_pois(self, *, lat: float, lon: float, radius_m: int, category: str) -> list[Poi]:
+        """Full distance-sorted POI list for a category (cached, uncapped)."""
         if category not in CATEGORY_FILTERS:
             raise ValueError(
                 f"unknown category {category!r}; expected one of {', '.join(CATEGORIES)}"
@@ -187,13 +241,13 @@ class OverpassClient:
         cached = self._cache.get(key)
         if cached is not None:
             logger.debug("overpass cache hit for %s", key)
-            return cached[:limit]
+            return cached
 
         elements = self._request(_build_query(lat, lon, radius_m, category))
         pois = self._parse(elements, lat, lon, category)
         pois.sort(key=lambda p: p.distance_m)
         self._cache.set(key, pois)
-        return pois[:limit]
+        return pois
 
     def _parse(
         self, elements: Sequence[Mapping[str, Any]], lat: float, lon: float, category: str
@@ -214,6 +268,7 @@ class OverpassClient:
                     osm_type=str(el.get("type", "")),
                     osm_id=int(el.get("id", 0)),
                     distance_m=_haversine_m(lat, lon, plat, plon),
+                    transit_type=_transit_type(tags) if category == "transit" else None,
                     tags=dict(tags),
                 )
             )
