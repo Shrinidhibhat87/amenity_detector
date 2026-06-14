@@ -75,6 +75,7 @@ class LocalityResult:
     pois: list[Poi]
     category_counts: dict[str, int]
     blurb: str
+    transit_breakdown: dict[str, int] | None = None
     attribution: str = _ATTRIBUTION
 
 
@@ -170,6 +171,7 @@ class LocalityAgent:
             pois=gathered.pois,
             category_counts=gathered.category_counts,
             blurb=blurb,
+            transit_breakdown=gathered.transit_breakdown,
         )
 
 
@@ -185,6 +187,9 @@ def _summarize(gathered: GatheredLocality) -> str:
         )
         scope = " (within 50 km)" if category == "airport" else ""
         lines.append(f"{label}{scope}: {res.total} nearby. Closest: {nearest}.")
+        if category == "transit" and res.subtype_counts:
+            modes = ", ".join(f"{n} {mode}" for mode, n in res.subtype_counts.items())
+            lines.append(f"  transit modes: {modes}.")
     return "\n".join(lines)
 
 

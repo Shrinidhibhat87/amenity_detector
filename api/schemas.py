@@ -144,6 +144,7 @@ class LocalityInsightSummary(BaseModel):
     radius_m: int | None = None
     blurb: str | None = None
     category_counts: dict[str, int] = Field(default_factory=dict)
+    transit_breakdown: dict[str, int] | None = None
     pois: list[dict] = Field(default_factory=list)
     attribution: str
 
@@ -389,5 +390,6 @@ class LocalityResponse(BaseModel):
     radius_m: int
     blurb: str
     category_counts: dict[str, int]
+    transit_breakdown: dict[str, int] | None = None
     pois: list[PoiResponse]
     attribution: str

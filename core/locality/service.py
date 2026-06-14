@@ -43,6 +43,7 @@ def persist_insight(session: Session, property_id: str, result: LocalityResult) 
     insight.radius_m = result.radius_m
     insight.pois = [poi_to_dict(p) for p in result.pois]
     insight.category_counts = result.category_counts
+    insight.transit_breakdown = result.transit_breakdown
     insight.blurb = result.blurb
     insight.attribution = result.attribution
 

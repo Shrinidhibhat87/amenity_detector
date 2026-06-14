@@ -58,7 +58,8 @@ class _FakeAgent:
                     tags={},
                 )
             ],
-            category_counts={"school": 1},
+            category_counts={"school": 1, "transit": 14},
+            transit_breakdown={"bus": 12, "rail": 2},
             blurb="Central spot with a school nearby.",
         )
 
@@ -76,7 +77,8 @@ def test_preview_returns_enriched_result(client: TestClient, fake_agent: _FakeAg
     assert resp.status_code == 200
     body = resp.json()
     assert body["display_name"].startswith("60311")
-    assert body["category_counts"] == {"school": 1}
+    assert body["category_counts"] == {"school": 1, "transit": 14}
+    assert body["transit_breakdown"] == {"bus": 12, "rail": 2}
     assert body["pois"][0]["name"] == "Goethe-Schule"
     assert "OpenStreetMap" in body["attribution"]
     # Defaults applied: country DE, radius 3 km, no street.
@@ -120,6 +122,33 @@ def test_preview_rejects_out_of_range_radius(client: TestClient, fake_agent: _Fa
     assert resp.status_code == 422
 
 
+def test_upstream_failure_returns_503_not_opaque_error(client: TestClient, test_app) -> None:
+    from core.locality.geocode import GeocodeError
+
+    class _FailingAgent:
+        def run(self, **_: object) -> LocalityResult:
+            raise GeocodeError("Nominatim returned non-retryable status 403")
+
+    test_app.dependency_overrides[get_locality_agent] = lambda: _FailingAgent()
+    resp = client.post("/api/v1/locality", json={"postal_code": "52062"})
+
+    assert resp.status_code == 503
+    assert "temporarily unavailable" in resp.json()["detail"]
+
+
+def test_persist_stores_transit_breakdown(
+    client: TestClient, fake_agent: _FakeAgent, db_session: Session
+) -> None:
+    prop = Property(name="Aachen flat")
+    db_session.add(prop)
+    db_session.commit()
+
+    client.post(f"/api/v1/properties/{prop.id}/locality", json={"postal_code": "52062"})
+
+    insight = db_session.query(LocalityInsight).filter_by(property_id=prop.id).one()
+    assert insight.transit_breakdown == {"bus": 12, "rail": 2}
+
+
 def test_preview_does_not_persist(
     client: TestClient, fake_agent: _FakeAgent, db_session: Session
 ) -> None:
@@ -139,7 +168,7 @@ def test_persist_writes_insight_to_property(
     assert resp.status_code == 200
     insight = db_session.query(LocalityInsight).filter_by(property_id=prop.id).one()
     assert insight.blurb == "Central spot with a school nearby."
-    assert insight.category_counts == {"school": 1}
+    assert insight.category_counts == {"school": 1, "transit": 14}
     assert insight.pois[0]["name"] == "Goethe-Schule"
 
 
