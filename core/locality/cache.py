@@ -80,6 +80,7 @@ def poi_to_dict(poi: Poi) -> dict[str, Any]:
         "osm_type": poi.osm_type,
         "osm_id": poi.osm_id,
         "distance_m": poi.distance_m,
+        "transit_type": poi.transit_type,
         "tags": dict(poi.tags),
     }
 
@@ -94,5 +95,6 @@ def poi_from_dict(data: dict[str, Any]) -> Poi:
         osm_type=data.get("osm_type", ""),
         osm_id=data.get("osm_id", 0),
         distance_m=data.get("distance_m", 0.0),
+        transit_type=data.get("transit_type"),
         tags=data.get("tags", {}),
     )
