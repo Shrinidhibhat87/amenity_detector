@@ -14,6 +14,7 @@ import type { PropertyDetail } from '@/lib/schemas';
 import { buildPropertyJsonLd } from '@/lib/json-ld';
 import { buildPropertyMetadata } from '@/lib/seo-metadata';
 import { Chip } from '@/components/ui';
+import { LocalityPanel } from '@/components/locality-panel';
 
 // Next.js 15: params is a Promise in async Server Components.
 // `handle` is either a database UUID (legacy bookmarks, pre-slug rows) or
@@ -214,6 +215,10 @@ export default async function PropertyDetailPage({ params }: Props) {
                   ))}
                 </div>
               </section>
+            )}
+
+            {property.locality_insight != null && (
+              <LocalityPanel insight={property.locality_insight} />
             )}
           </div>
 
