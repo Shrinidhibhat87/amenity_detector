@@ -25,12 +25,12 @@ Next.js 15 (App Router, TS) ──── server-rendered HTML, JSON-LD,
   │  REST over HTTP
   ▼
 FastAPI                       ──── /api/v1/properties, /images,
-  │             ╲                    /search, /describe, /metrics
-  │ SQLAlchemy   ╲ VLMClient
-  ▼               ▼
-PostgreSQL       OpenRouter (4 registered VLMs)
-+ pgvector
-+ FTS
+  │      ╲      ╲                    /search, /describe, /locality, /metrics
+  │ SQLAl ╲ VLM  ╲ locality agent
+  ▼       ▼       ▼
+PostgreSQL  OpenRouter  OSM (Nominatim geocode
++ pgvector  (VLMs +     + Overpass POIs, cached
++ FTS       blurb LLM)  in Postgres, $0)
 ```
 
 The frontend never imports backend internals. It speaks HTTP only. The backend
@@ -130,8 +130,10 @@ from the dropdown. Live pricing: https://openrouter.ai/models.
 | `GET`    | `/api/v1/properties/`                      | List properties                                       |
 | `GET`    | `/api/v1/properties/{id}`                  | Get full property details                             |
 | `POST`   | `/api/v1/search`                           | Hybrid NL search (FTS + pgvector rerank)              |
-| `POST`   | `/api/v1/locality`                         | Preview neighbourhood enrichment for a free-text location (OSM) |
+| `POST`   | `/api/v1/locality`                         | Preview neighbourhood enrichment for a PIN (+ street, country, radius) |
+| `POST`   | `/api/v1/locality/stream`                  | Same as above, streamed over SSE with per-category progress |
 | `POST`   | `/api/v1/properties/{id}/locality`         | Run + persist locality enrichment on a property       |
+| `POST`   | `/api/v1/properties/{id}/locality/stream`  | Run + persist, streamed over SSE with per-category progress |
 | `GET`    | `/api/v1/images/{id}`                      | Serve stored image bytes                              |
 | `PATCH`  | `/api/v1/images/{id}`                      | Update alt_text, caption, is_primary, display_order   |
 | `DELETE` | `/api/v1/properties/{id}`                  | Delete a property                                     |
@@ -158,6 +160,37 @@ curl -X PATCH http://localhost:8000/api/v1/properties/<property_id> \
 
 The create response includes an auto-generated immutable `slug` (e.g.
 `frankfurt-apartment-d4e1f2`) used by the public Next.js listing pages.
+
+## Neighbourhood Enrichment (Lage)
+
+The upload wizard fills the "Lage" (location) section automatically. The user
+enters a **country** (default DE), a **PIN code** (required), an optional
+**street**, and a **search radius** (1–10 km, default 3 km). The backend geocodes
+the PIN with OpenStreetMap Nominatim, then counts nearby POIs with Overpass
+across a fixed set of categories — supermarkets, schools, gyms, parks, public
+transport, pharmacies, and airports (searched at a wider fixed radius).
+
+Counts are **deterministic**: every everyday category is measured once at the
+chosen radius (no per-category radius drift, no cap-as-count), so the numbers the
+panel shows are the numbers a written blurb is generated from. Public transport is
+broken down by mode (bus / tram / U-Bahn / S-Bahn / rail) so the real composition
+is verifiable. Everything runs on free OSM APIs, cached in Postgres ($0), and
+surfaces the required `© OpenStreetMap contributors` attribution.
+
+The streaming endpoints emit Server-Sent Events — one frame per category as it
+resolves (so the UI shows a determinate progress bar), then a final result frame;
+an upstream OSM failure becomes a clean `error` frame instead of a dropped
+connection.
+
+```bash
+# Watch the stream tick by, category by category:
+curl -N http://localhost:8000/api/v1/locality/stream \
+  -H "Content-Type: application/json" \
+  -d '{"postal_code":"52062","country_code":"DE","radius_m":2000}'
+```
+
+Architecture and internals are documented in
+[`core/locality/README.md`](core/locality/README.md).
 
 ## Local Development
 
