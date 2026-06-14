@@ -24,12 +24,18 @@ Why this pattern?
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
 from core.search.pipeline import SearchPipeline
 from db.session import get_db
 from models.registry import ModelRegistry
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from core.locality.agent import LocalityAgent
 
 
 def get_model_registry(request: Request) -> ModelRegistry:
@@ -96,6 +102,24 @@ def get_embedder(request: Request):  # type: ignore[no-untyped-def]
     return getattr(request.app.state, "embeddings_client", None)
 
 
+def get_locality_agent(db: "Session" = Depends(get_db)) -> "LocalityAgent":
+    """Build a per-request locality agent wired to this session's DB caches.
+
+    Constructed per request (not a singleton) because its OSM cache adapters
+    bind to the request's SQLAlchemy session. Missing OSM/OpenRouter config is
+    surfaced as a 503 rather than a 500 — the rest of the app keeps working.
+    """
+    from core.locality.service import build_locality_agent
+
+    try:
+        return build_locality_agent(db)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Locality enrichment is not configured: {exc}",
+        ) from exc
+
+
 # Re-export get_db so routers only need to import from this module
 __all__ = [
     "get_db",
@@ -103,4 +127,5 @@ __all__ = [
     "get_image_storage_dir",
     "get_search_pipeline",
     "get_embedder",
+    "get_locality_agent",
 ]

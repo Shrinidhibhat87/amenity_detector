@@ -317,3 +317,44 @@ class SearchRequest(BaseModel):
 
     query: Annotated[str, StringConstraints(min_length=1, max_length=500)]
     limit: Annotated[int, Field(ge=1, le=100)] = 20
+
+
+# ── Locality enrichment schemas ──────────────────────────────────────────────
+
+
+class LocalityRequest(BaseModel):
+    """Body for the locality endpoints.
+
+    ``location`` is one flexible free-text field — a PIN code, a street, or a
+    Stadtteil. ``radius_m`` is an optional preferred starting search radius; the
+    agent still decides the final radius and may widen on sparse results.
+    """
+
+    location: Annotated[str, StringConstraints(min_length=1, max_length=255)]
+    radius_m: Annotated[int, Field(ge=200, le=5000)] | None = None
+
+
+class PoiResponse(BaseModel):
+    """A single nearby point of interest."""
+
+    category: str
+    name: str
+    latitude: float
+    longitude: float
+    distance_m: float
+    osm_type: str
+    osm_id: int
+
+
+class LocalityResponse(BaseModel):
+    """The enriched neighbourhood result returned by both locality endpoints."""
+
+    location_query: str
+    display_name: str
+    latitude: float | None
+    longitude: float | None
+    radius_m: int
+    blurb: str
+    category_counts: dict[str, int]
+    pois: list[PoiResponse]
+    attribution: str

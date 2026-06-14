@@ -158,12 +158,20 @@ class LocalityAgent:
             model=model,
         )
 
-    def run(self, location_query: str) -> LocalityResult:
-        """Run the agent loop for ``location_query`` and return the enriched result."""
+    def run(self, location_query: str, *, radius_hint: int | None = None) -> LocalityResult:
+        """Run the agent loop for ``location_query`` and return the enriched result.
+
+        ``radius_hint`` is an optional preferred starting search radius (metres)
+        surfaced to the model; it still decides the final radius and may widen.
+        """
         state = _RunState()
+        user_msg = f"Location: {location_query}"
+        if radius_hint is not None:
+            state.last_radius_m = _clamp_radius(radius_hint)
+            user_msg += f"\nPreferred starting search radius: {state.last_radius_m} m."
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": f"Location: {location_query}"},
+            {"role": "user", "content": user_msg},
         ]
 
         for _ in range(self._max_iterations):
