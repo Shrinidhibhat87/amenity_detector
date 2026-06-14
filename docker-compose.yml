@@ -61,6 +61,12 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-amenity_user}:${POSTGRES_PASSWORD:-amenity_pass}@db:5432/${POSTGRES_DB:-amenity_db}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       IMAGE_STORAGE_DIR: /app/storage/images
+      # Locality enrichment (OSM). NOMINATIM_USER_AGENT is required by the
+      # Nominatim usage policy; without it the locality endpoints return 503.
+      NOMINATIM_USER_AGENT: ${NOMINATIM_USER_AGENT:-}
+      NOMINATIM_BASE_URL: ${NOMINATIM_BASE_URL:-https://nominatim.openstreetmap.org}
+      OVERPASS_BASE_URL: ${OVERPASS_BASE_URL:-https://overpass-api.de/api}
+      LOCALITY_AGENT_MODEL: ${LOCALITY_AGENT_MODEL:-openai/gpt-4o-mini}
     volumes:
       # Named volume for uploaded images — survives container rebuilds
       - image_storage:/app/storage/images
