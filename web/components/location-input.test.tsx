@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { LocalityInsight } from '@/lib/schemas';
 
@@ -35,18 +35,40 @@ describe('LocationInput', () => {
     persistLocality.mockReset();
   });
 
-  it('persists the typed location and renders the resulting blurb', async () => {
+  it('persists the PIN with country and radius, then renders the blurb', async () => {
     persistLocality.mockResolvedValue(result);
     const user = userEvent.setup();
     render(<LocationInput propertyId="prop-1" />);
 
-    await user.type(screen.getByLabelText('Location'), '60311');
+    await user.type(screen.getByLabelText('PIN'), '60311');
     await user.click(screen.getByRole('button', { name: 'Find' }));
 
     await waitFor(() => {
       expect(screen.getByText('Lively central area near a school.')).toBeInTheDocument();
     });
-    expect(persistLocality).toHaveBeenCalledWith('prop-1', { postalCode: '60311' });
+    expect(persistLocality).toHaveBeenCalledWith('prop-1', {
+      postalCode: '60311',
+      street: undefined,
+      countryCode: 'DE',
+      radiusM: 3000,
+    });
+  });
+
+  it('forwards the chosen radius', async () => {
+    persistLocality.mockResolvedValue(result);
+    const user = userEvent.setup();
+    render(<LocationInput propertyId="prop-1" />);
+
+    await user.type(screen.getByLabelText('PIN'), '60311');
+    const slider = screen.getByLabelText('Search radius in kilometres');
+    fireEvent.change(slider, { target: { value: '7' } });
+    await user.click(screen.getByRole('button', { name: 'Find' }));
+
+    await waitFor(() => expect(persistLocality).toHaveBeenCalled());
+    expect(persistLocality).toHaveBeenCalledWith(
+      'prop-1',
+      expect.objectContaining({ radiusM: 7000 }),
+    );
   });
 
   it('does not call the API when the input is blank', async () => {
@@ -65,7 +87,7 @@ describe('LocationInput', () => {
     const user = userEvent.setup();
     render(<LocationInput propertyId="prop-1" />);
 
-    await user.type(screen.getByLabelText('Location'), 'nowhere');
+    await user.type(screen.getByLabelText('PIN'), 'nowhere');
     await user.click(screen.getByRole('button', { name: 'Find' }));
 
     await waitFor(() => {
