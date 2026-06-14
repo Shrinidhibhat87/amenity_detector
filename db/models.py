@@ -261,6 +261,10 @@ class LocalityInsight(Base):
     pois: Mapped[list[dict[str, Any]]] = mapped_column(_JSON_DOC, nullable=False, default=list)
     category_counts: Mapped[dict[str, int]] = mapped_column(_JSON_DOC, nullable=False, default=dict)
 
+    # Per-mode transit breakdown ({"bus": 12, "rail": 2}). Null for legacy rows
+    # written before subtypes existed; lets the UI show the real composition.
+    transit_breakdown: Mapped[dict[str, int] | None] = mapped_column(_JSON_DOC, nullable=True)
+
     # The synthesized neighbourhood paragraph (the Lage box).
     blurb: Mapped[str | None] = mapped_column(Text, nullable=True)
 
