@@ -14,28 +14,110 @@ and a GitHub Actions CI gate.
 
 ## Architecture
 
-```text
-Browser
-  │
-  │  http://localhost:3000
-  ▼
-Next.js 15 (App Router, TS) ──── server-rendered HTML, JSON-LD,
-  │                              /sitemap.xml, /robots.txt,
-  │                              /llms.txt, /api/feed.jsonl
-  │  REST over HTTP
-  ▼
-FastAPI                       ──── /api/v1/properties, /images,
-  │      ╲      ╲                    /search, /describe, /locality, /metrics
-  │ SQLAl ╲ VLM  ╲ locality agent
-  ▼       ▼       ▼
-PostgreSQL  OpenRouter  OSM (Nominatim geocode
-+ pgvector  (VLMs +     + Overpass POIs, cached
-+ FTS       blurb LLM)  in Postgres, $0)
-```
-
 The frontend never imports backend internals. It speaks HTTP only. The backend
 owns model selection, image storage, detection orchestration, embedding
 indexing, and database writes.
+
+### Component diagram
+
+```mermaid
+graph TD
+    Browser["Browser / Crawler / AI agent"]
+
+    subgraph web["web — Next.js 15 (App Router, TS) · :3000"]
+        Pages["Server components<br/>browse · search · detect wizard · listing pages"]
+        SEO["SEO + agent routes<br/>/sitemap.xml · /robots.txt<br/>/llms.txt · /api/feed.jsonl"]
+        NLParse["/api/parse<br/>NL query → filter"]
+    end
+
+    subgraph api["api — FastAPI · :8000"]
+        Routers["Routers<br/>properties · images · search<br/>locality · models"]
+        Sys["PropertyAmenitySystem<br/>orchestration"]
+        Search["SearchPipeline<br/>FTS + pgvector rerank"]
+        Loc["LocalityAgent<br/>geocode + POIs + blurb"]
+        Obs["/health · /metrics"]
+    end
+
+    subgraph data["Stateful services"]
+        DB[("PostgreSQL 16<br/>+ pgvector + FTS · :5432")]
+        FS["Image storage<br/>volume"]
+    end
+
+    subgraph ext["External APIs"]
+        OR["OpenRouter<br/>VLMs + blurb LLM"]
+        EMB["Embeddings endpoint<br/>OpenAI-compatible"]
+        OSM["OpenStreetMap<br/>Nominatim + Overpass"]
+    end
+
+    subgraph mon["Monitoring"]
+        PROM["Prometheus · :9090"]
+        GRAF["Grafana · :3030"]
+    end
+
+    Browser -->|HTTP :3000| Pages
+    Browser --> SEO
+    Pages -->|REST| Routers
+    NLParse --> Routers
+    SEO -->|REST| Routers
+
+    Routers --> Sys
+    Routers --> Search
+    Routers --> Loc
+    Sys --> DB
+    Sys --> FS
+    Sys --> OR
+    Search --> DB
+    Search --> EMB
+    Loc --> DB
+    Loc --> OSM
+    Loc --> OR
+
+    PROM --> Obs
+    GRAF --> PROM
+
+    click Routers "api/README.md" "API layer docs"
+    click Sys "core/README.md" "Core logic docs"
+    click DB "db/README.md" "Database docs"
+```
+
+Per-layer internals are documented separately:
+
+- [`api/README.md`](api/README.md) — routers, dependency injection, request lifecycle.
+- [`core/README.md`](core/README.md) — detection, search, and locality pipelines.
+- [`db/README.md`](db/README.md) — schema, ORM relationships, migration chain.
+
+### Container topology (Docker Compose)
+
+```mermaid
+graph LR
+    subgraph compose["docker-compose.yml"]
+        webc["web<br/>Next.js standalone<br/>:3000"]
+        apic["api<br/>uvicorn<br/>:8000"]
+        dbc[("db<br/>pgvector/pg16<br/>:5432")]
+        promc["prometheus<br/>:9090"]
+        grafc["grafana<br/>:3030→3000"]
+    end
+
+    vol1[("postgres_data")]
+    vol2[("image_storage")]
+    vol3[("grafana_data")]
+
+    webc -->|API_BASE_URL http://api:8000| apic
+    apic -->|DATABASE_URL @db:5432| dbc
+    promc -->|scrape /metrics| apic
+    grafc --> promc
+
+    dbc --- vol1
+    apic --- vol2
+    grafc --- vol3
+
+    webc -.depends_on healthy.-> apic
+    apic -.depends_on healthy.-> dbc
+```
+
+`depends_on` health gating means `web` waits for `api` to pass `/health`, and
+`api` waits for Postgres `pg_isready`. Named volumes survive `docker compose
+down`; only `down -v` destroys the database.
 
 ## Quick Start
 
@@ -118,6 +200,74 @@ Expected shape:
 Default VLM is `openai/gpt-4o-mini`. Switch to `google/gemini-pro-1.5`,
 `meta-llama/llama-3.2-11b-vision-instruct`, or `qwen/qwen2-vl-72b-instruct`
 from the dropdown. Live pricing: https://openrouter.ai/models.
+
+## End-to-End Flow
+
+The full lifecycle of a listing — from raw photos to a searchable, crawlable,
+locality-enriched property.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Web as Next.js (web)
+    participant API as FastAPI (api)
+    participant Sys as PropertyAmenitySystem
+    participant Det as AmenityDetector
+    participant OR as OpenRouter (VLM)
+    participant OSM as OSM (Nominatim+Overpass)
+    participant EMB as Embeddings
+    participant DB as PostgreSQL
+
+    Note over User,DB: 1. Create shell
+    User->>Web: /detect/config (name, model, metadata)
+    Web->>API: POST /api/v1/properties/
+    API->>Sys: create_property_shell()
+    Sys->>DB: INSERT property (+ derive slug)
+    API-->>Web: property_id + slug
+
+    Note over User,DB: 2. Upload & detect (per image)
+    loop Each image
+        User->>Web: /detect/upload
+        Web->>API: POST /properties/{id}/images
+        API->>Sys: process_one_image()
+        Sys->>Det: detect_image_full()
+        Det->>Det: preprocess (resize ≤768px)
+        Det->>OR: room_type + amenities + alt_text/caption
+        OR-->>Det: structured JSON
+        Sys->>DB: INSERT image + detected_amenities
+        API-->>Web: detections + alt_text/caption
+    end
+
+    Note over User,DB: 3. Review & describe
+    User->>Web: /detect/review (confirm/edit/reject/add)
+    User->>Web: /detect/describe
+    Web->>API: POST /properties/{id}/describe
+    API->>Sys: generate_description_from_amenities()
+    Sys->>OR: description prompt (reviewed amenities + hints)
+    OR-->>Sys: description
+    Sys->>DB: UPDATE property.description
+
+    Note over User,DB: 4. Locality enrichment (Lage)
+    Web->>API: POST /properties/{id}/locality[/stream]
+    API->>OSM: geocode PIN → coord, count POIs per category
+    OSM-->>API: counts + transit breakdown
+    API->>OR: write blurb from exact counts
+    API->>DB: UPSERT locality_insights (cached POIs, $0)
+
+    Note over User,DB: 5. Index for search
+    API->>EMB: embed(index_text)
+    EMB-->>API: vector
+    API->>DB: store description_embedding + FTS doc
+
+    Note over User,DB: 6. Discover
+    User->>Web: /search "3BHK under 1500 EUR w/ fireplace"
+    Web->>API: POST /api/v1/search
+    API->>EMB: embed(query)
+    API->>DB: FTS candidates → pgvector rerank
+    DB-->>API: ranked properties
+    API-->>Web: results
+    Note over Web: Crawlers/agents read /sitemap.xml, /llms.txt, /api/feed.jsonl
+```
 
 ## API Overview
 
