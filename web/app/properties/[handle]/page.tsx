@@ -55,7 +55,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const p = looksLikeUuid(handle)
       ? await getProperty(handle)
       : await getPropertyBySlug(handle);
-    return buildPropertyMetadata(p, SITE_URL);
+    const metadata = buildPropertyMetadata(p, SITE_URL);
+    // An unpublished draft is only reachable by its id, as a private preview.
+    // Keep crawlers out of it even if the link leaks.
+    if (p.status !== 'published') {
+      return { ...metadata, robots: { index: false, follow: false } };
+    }
+    return metadata;
   } catch {
     return { title: 'Property — Amenity Detector' };
   }
@@ -117,6 +123,12 @@ export default async function PropertyDetailPage({ params }: Props) {
       ))}
 
       <main className="flex-1 px-6 py-12 max-w-5xl mx-auto w-full">
+        {property.status !== 'published' && (
+          <p className="mb-6 rounded-xl border border-border bg-surface-alt px-4 py-3 font-mono text-xs text-ink-muted">
+            Draft preview — this listing is not public yet.
+          </p>
+        )}
+
         {/* Breadcrumb */}
         <nav className="mb-8">
           <Link

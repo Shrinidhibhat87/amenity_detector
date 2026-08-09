@@ -26,6 +26,7 @@ function realisticRent(): PropertyDetail {
   return {
     id: 'rent-001',
     name: 'Sachsenhausen 3BHK Apartment',
+    status: 'published' as const,
     description: 'Top-floor flat with parquet floors and a south-facing balcony.',
     model_used: 'openai/gpt-4o-mini',
     extra_info: null,

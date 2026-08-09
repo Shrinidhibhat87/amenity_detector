@@ -82,8 +82,8 @@ export default async function Home() {
               },
               {
                 step: '03',
-                title: 'Publish &amp; get found',
-                body: 'Review the results, generate a listing description, and let buyers search by the amenities they need.',
+                title: 'Publish & get found',
+                body: 'Review the results, generate a listing description, publish when it is ready, and let buyers search by the amenities they need.',
               },
             ].map(({ step, title, body }) => (
               <div key={step} className="space-y-3">
@@ -91,10 +91,7 @@ export default async function Home() {
                   {step}
                 </p>
                 <h3 className="text-lg font-medium text-ink">{title}</h3>
-                <p
-                  className="text-sm text-ink-soft leading-relaxed"
-                  dangerouslySetInnerHTML={{ __html: body }}
-                />
+                <p className="text-sm text-ink-soft leading-relaxed">{body}</p>
               </div>
             ))}
           </div>
@@ -138,7 +135,7 @@ export default async function Home() {
       <footer className="mt-auto border-t border-border bg-surface">
         <div className="max-w-7xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="font-mono text-xs text-ink-muted">
-            Amenity Detector · Phase B · Browse + SEO
+            Amenity Detector · Browse + SEO
           </p>
           <div className="flex gap-6 font-mono text-xs text-ink-muted">
             <a
