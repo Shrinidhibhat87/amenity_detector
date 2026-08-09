@@ -28,8 +28,13 @@ def _create_property_with_images(
     *,
     name: str,
     image_filenames: list[str],
+    publish: bool = True,
 ) -> str:
-    """Create a property shell then upload one or more images through the live API."""
+    """Create a property shell, upload images, and publish it through the live API.
+
+    Publishing is on by default because most assertions here are about the
+    public list/search surfaces, which only show published listings.
+    """
     shell_response = client.post(
         "/api/v1/properties/",
         json={"name": name, "model_name": "openai/gpt-4o-mini"},
@@ -44,6 +49,15 @@ def _create_property_with_images(
             files={"file": (filename, sample_image_bytes, "image/jpeg")},
         )
         assert image_response.status_code == 201
+
+    if publish:
+        patched = client.patch(
+            f"/api/v1/properties/{property_id}",
+            json={"description": f"{name} description."},
+        )
+        assert patched.status_code == 200
+        published = client.post(f"/api/v1/properties/{property_id}/publish")
+        assert published.status_code == 200
 
     return property_id
 

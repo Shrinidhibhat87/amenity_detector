@@ -20,6 +20,7 @@ from sqlalchemy import Select, and_, exists, select
 
 from core.search.filter import SearchFilter
 from db.models import DetectedAmenity, Property
+from db.status import PropertyStatus
 
 CANDIDATE_LIMIT = 200
 
@@ -31,7 +32,9 @@ def build_candidate_query(filter_: SearchFilter) -> Select:
     whether to ``execute`` it directly or wrap it for ranking.
     """
     stmt = select(Property)
-    conditions = list(_scalar_predicates(filter_))
+    # Search is a public surface: an unpublished draft must never rank.
+    conditions: list = [Property.status == PropertyStatus.PUBLISHED]
+    conditions.extend(_scalar_predicates(filter_))
     conditions.extend(_amenity_exists_clauses(filter_))
     if conditions:
         stmt = stmt.where(and_(*conditions))
