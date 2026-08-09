@@ -23,6 +23,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
+from db.status import PropertyStatus
+
 # ── Phase 9 listing-metadata enum-like literals ──────────────────────────────
 # These are Pydantic Literals rather than DB-native ENUMs so the same schema
 # round-trips through SQLite (tests) and PostgreSQL (production) without a
@@ -120,6 +122,9 @@ class PropertySummaryResponse(_PropertyMetadataMixin):
 
     id: str
     name: str
+    # Publication state (db/status.py). Only 'published' rows reach the public
+    # surfaces; the wizard reads it to know whether a draft is already live.
+    status: str = PropertyStatus.DRAFT
     description: str | None
     model_used: str | None
     extra_info: str | None
@@ -160,6 +165,7 @@ class PropertyDetailResponse(_PropertyMetadataMixin):
 
     id: str
     name: str
+    status: str = PropertyStatus.DRAFT
     description: str | None
     model_used: str | None
     extra_info: str | None
