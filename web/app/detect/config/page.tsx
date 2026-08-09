@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { ApiError, createProperty, listModels } from '@/lib/api';
 import { useWizardStore, type ConfigInput } from '@/lib/wizard-store';
@@ -56,9 +56,13 @@ export default function ConfigStepPage() {
   }, []);
 
   // Resume where the work left off. Skipped until hydration finishes so the
-  // SSR default (`step: 'config'`) does not flash a wrong redirect.
+  // SSR default (`step: 'config'`) does not flash a wrong redirect, and run
+  // only once per mount: arriving here deliberately from the stepper sets the
+  // step to 'config' first, and a re-running redirect would fight that.
+  const resumed = useRef(false);
   useEffect(() => {
-    if (!hasHydrated) return;
+    if (!hasHydrated || resumed.current) return;
+    resumed.current = true;
     if (state.step !== 'config') {
       router.replace(`/detect/${state.step}`);
     }

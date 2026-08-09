@@ -15,6 +15,7 @@ import {
   type AmenityItem,
   type UploadedImage,
 } from '@/lib/wizard-store';
+import { useWizardStepSync } from '@/lib/use-wizard-step';
 import { Button } from '@/components/ui';
 import { LocalityEnrichment } from '@/components/locality-enrichment';
 
@@ -31,7 +32,6 @@ export default function UploadStepPage() {
   const addImage = useWizardStore((s) => s.addImage);
   const updateImage = useWizardStore((s) => s.updateImage);
   const goToReview = useWizardStore((s) => s.goToReview);
-  const goToStep = useWizardStore((s) => s.goToStep);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -44,8 +44,8 @@ export default function UploadStepPage() {
   useEffect(() => {
     if (!hasHydrated) return;
     if (state.propertyId == null) router.replace('/detect/config');
-    else if (state.step !== 'upload') goToStep('upload');
-  }, [hasHydrated, state.propertyId, state.step, goToStep, router]);
+  }, [hasHydrated, state.propertyId, router]);
+  useWizardStepSync('upload');
 
   const startUpload = useCallback(
     async (files: File[]) => {
