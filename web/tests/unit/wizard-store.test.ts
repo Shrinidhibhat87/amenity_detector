@@ -240,4 +240,24 @@ describe('wizard store — persistence', () => {
     expect(raw).toContain('prop-1');
     expect(raw).toContain('p.jpg');
   });
+
+  it('fills in fields a blob written by an older schema is missing', async () => {
+    // A draft persisted before `images` / `furthest` / `published` existed.
+    localStorage.setItem(
+      'wizard',
+      JSON.stringify({
+        state: { state: { step: 'upload', propertyId: 'prop-legacy', config: { name: 'Old' } } },
+        version: 0,
+      }),
+    );
+    await useWizardStore.persist.rehydrate();
+
+    const { state } = useWizardStore.getState();
+    expect(state.propertyId).toBe('prop-legacy');
+    expect(state.config.name).toBe('Old');
+    expect(state.config.model_name).toBe('');
+    expect(state.images).toEqual([]);
+    expect(state.furthest).toBe('config');
+    expect(state.published).toBe(false);
+  });
 });
