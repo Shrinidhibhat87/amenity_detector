@@ -3,6 +3,7 @@ Properties router — handles all /api/v1/properties/* endpoints.
 
 Endpoints:
   POST   /api/v1/properties/{id}/describe   Regenerate description from edited amenity list
+  POST   /api/v1/properties/{id}/publish    Make a finished listing publicly visible
   GET    /api/v1/properties/                List all properties (paginated)
   GET    /api/v1/properties/search          Filter by required amenities
   GET    /api/v1/properties/{id}            Full property details
@@ -40,8 +41,10 @@ from api.schemas import (
 from core.amenity_data_manager import AmenityDataManager
 from core.amenity_system import PropertyAmenitySystem
 from core.embeddings import EmbeddingsClient
+from core.lifecycle import advance_to, can_publish, mark_stage_failed
 from core.search.pipeline import reindex_property
 from db.session import get_db
+from db.status import PropertyStatus
 from models.registry import ModelRegistry
 
 logger = logging.getLogger(__name__)
@@ -135,6 +138,13 @@ def patch_property(
     updated = manager.update_property(property_id, fields)
     if updated is None:
         raise HTTPException(status_code=404, detail=f"Property '{property_id}' not found.")
+
+    # Saving a non-empty description is the point where a draft becomes a
+    # finished listing — one publish action away from going public.
+    saved_description = fields.get("description")
+    if saved_description is not None and saved_description.strip():
+        advance_to(updated, PropertyStatus.COMPLETED)
+
     db.commit()
     db.refresh(updated)
 
@@ -202,7 +212,10 @@ def upload_property_image(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         logger.exception("Single image processing failed for property '%s'", property_id)
+        _record_stage_failure(db, property_id)
         raise HTTPException(status_code=500, detail=f"Image processing failed: {e}") from e
+
+    _advance_property(db, property_id, PropertyStatus.PROCESSING)
 
     return ImageDetectionResponse(
         property_id=property_id,
@@ -368,9 +381,47 @@ def regenerate_description(
         )
     except Exception as e:
         logger.exception("Description regeneration failed for property '%s'", property_id)
+        _record_stage_failure(db, property_id)
         raise HTTPException(status_code=500, detail=f"Description generation failed: {e}") from e
 
+    # The draft now has something to review, even though the user has not
+    # saved it yet — that save is what marks the listing completed.
+    _advance_property(db, property_id, PropertyStatus.READY_FOR_REVIEW)
+
     return DescribeResponse(description=description)
+
+
+@router.post("/{property_id}/publish", response_model=PropertyDetailResponse)
+def publish_property(
+    property_id: str,
+    db: Session = Depends(get_db),
+) -> PropertyDetailResponse:
+    """
+    Make a finished listing publicly visible.
+
+    Publication is deliberately its own action rather than a side effect of
+    saving: everything before this point is a private draft, and only a
+    published property appears in browse, search, the sitemap, llms.txt and
+    the JSONL feed.
+
+    Raises:
+        404: If the property does not exist.
+        409: If the listing is not complete enough to publish.
+    """
+    from db.models import Property as PropertyModel
+
+    prop = db.get(PropertyModel, property_id)
+    if prop is None:
+        raise HTTPException(status_code=404, detail=f"Property '{property_id}' not found.")
+
+    ready, reason = can_publish(prop)
+    if not ready:
+        raise HTTPException(status_code=409, detail=reason)
+
+    prop.status = PropertyStatus.PUBLISHED
+    db.commit()
+    db.refresh(prop)
+    return _build_detail_response(prop)
 
 
 @router.get("/{property_id}", response_model=PropertyDetailResponse)
@@ -423,7 +474,42 @@ def delete_property(
     db.commit()
 
 
-# ── Helper ───────────────────────────────────────────────────────────────────
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _advance_property(db: Session, property_id: str, target: str) -> None:
+    """Move a property forward in the lifecycle after a stage completed.
+
+    Best-effort: the stage itself already succeeded, so a bookkeeping failure
+    must not turn a good response into a 500.
+    """
+    from db.models import Property as PropertyModel
+
+    prop = db.get(PropertyModel, property_id)
+    if prop is None:
+        return
+    try:
+        if advance_to(prop, target):
+            db.commit()
+    except Exception:
+        logger.exception("Status advance to '%s' failed for %s; continuing", target, property_id)
+        db.rollback()
+
+
+def _record_stage_failure(db: Session, property_id: str) -> None:
+    """Record a failed stage on the property, if it still exists."""
+    from db.models import Property as PropertyModel
+
+    db.rollback()
+    prop = db.get(PropertyModel, property_id)
+    if prop is None:
+        return
+    try:
+        mark_stage_failed(prop, has_usable_work=bool(prop.images))
+        db.commit()
+    except Exception:
+        logger.exception("Recording stage failure failed for %s; continuing", property_id)
+        db.rollback()
 
 
 _PROPERTY_METADATA_FIELDS = (
@@ -475,6 +561,7 @@ def _build_detail_response(prop: object) -> PropertyDetailResponse:
     return PropertyDetailResponse(
         id=prop.id,
         name=prop.name,
+        status=prop.status,
         description=prop.description,
         model_used=prop.model_used,
         extra_info=prop.extra_info,
