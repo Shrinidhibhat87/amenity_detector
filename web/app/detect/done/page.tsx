@@ -14,10 +14,10 @@ export default function DoneStepPage() {
 
   useEffect(() => {
     if (!hasHydrated) return;
-    if (state.step !== 'done') router.replace(`/detect/${state.step}`);
-  }, [hasHydrated, state.step, router]);
+    if (state.propertyId == null) router.replace('/detect/config');
+  }, [hasHydrated, state.propertyId, router]);
 
-  if (!hasHydrated || state.step !== 'done') return null;
+  if (!hasHydrated || state.propertyId == null) return null;
 
   return (
     <div className="text-center space-y-6 py-10">

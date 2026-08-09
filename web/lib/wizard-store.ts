@@ -1,18 +1,25 @@
 /**
  * Detection wizard state — Zustand store with localStorage persistence.
  *
- * Why a discriminated union over a flat state?
- *   Each step needs different fields. In the config step there's no
- *   propertyId yet; in the upload step it must exist. A flat shape with
- *   propertyId?: string forces every consumer to handle `undefined` even
- *   when the step guarantees it. The discriminated union lets the compiler
- *   narrow by the `step` field, so `state.step === 'upload'` proves
- *   `state.propertyId: string`.
+ * Why a flat shape rather than a discriminated union per step?
+ *   The union modelled the wizard as a one-way pipeline: each transition
+ *   rebuilt the state for the next step, so walking backwards meant either
+ *   losing fields or adding a bespoke "go back" action per hop. The wizard is
+ *   not one-way — a user adds photos from review, re-reads the description,
+ *   returns. A flat state with a `furthest` marker says the same thing in less
+ *   code: every field that has been collected stays collected, `step` is where
+ *   the user is looking, and `furthest` is how far the work has actually got.
+ *
+ * Invalidation:
+ *   Editing amenities changes the facts the description was written from, so
+ *   the description is marked stale and the user is told to regenerate.
+ *   Editing listing metadata (price, tone later) does not touch detection or
+ *   the description — no invalidation.
  *
  * Persistence:
- *   The store survives page reloads via Zustand's `persist` middleware,
- *   which serialises to localStorage. Only the state (not actions) is
- *   persisted; actions are recreated by the store factory on every load.
+ *   The store survives page reloads via Zustand's `persist` middleware, which
+ *   serialises to localStorage. Only state is persisted; actions are recreated
+ *   by the store factory on every load.
  */
 
 import { create } from 'zustand';
@@ -68,38 +75,41 @@ export interface UploadedImage {
   roomType?: string | null;
 }
 
-// ── Discriminated union for step state ────────────────────────────────────────
+// ── Steps ─────────────────────────────────────────────────────────────────────
+
+export const WIZARD_STEPS = ['config', 'upload', 'review', 'describe', 'done'] as const;
+export type WizardStep = (typeof WIZARD_STEPS)[number];
+
+const stepIndex = (step: WizardStep): number => WIZARD_STEPS.indexOf(step);
+
+export interface WizardState {
+  /** Where the user is looking right now. */
+  step: WizardStep;
+  /** The furthest step the work has actually reached — the navigable range. */
+  furthest: WizardStep;
+  config: ConfigInput;
+  /** Set once the server has created the property shell. */
+  propertyId: string | null;
+  images: UploadedImage[];
+  description: string;
+  /** The description no longer matches the reviewed amenities. */
+  descriptionStale: boolean;
+  /** True once the publish action has succeeded on the server. */
+  published: boolean;
+}
 
 const EMPTY_CONFIG: ConfigInput = { name: '', model_name: '' };
 
-export type WizardState =
-  | { step: 'config'; config: ConfigInput }
-  | {
-      step: 'upload';
-      config: ConfigInput;
-      propertyId: string;
-      images: UploadedImage[];
-    }
-  | {
-      step: 'review';
-      config: ConfigInput;
-      propertyId: string;
-      images: UploadedImage[];
-    }
-  | {
-      step: 'describe';
-      config: ConfigInput;
-      propertyId: string;
-      images: UploadedImage[];
-      description: string;
-    }
-  | {
-      step: 'done';
-      config: ConfigInput;
-      propertyId: string;
-      images: UploadedImage[];
-      description: string;
-    };
+const INITIAL_STATE: WizardState = {
+  step: 'config',
+  furthest: 'config',
+  config: { ...EMPTY_CONFIG },
+  propertyId: null,
+  images: [],
+  description: '',
+  descriptionStale: false,
+  published: false,
+};
 
 // ── Store shape (state + actions in one) ──────────────────────────────────────
 
@@ -116,131 +126,102 @@ interface WizardStore {
   startUpload: (propertyId: string) => void;
   addImage: (image: UploadedImage) => void;
   updateImage: (clientId: string, patch: Partial<UploadedImage>) => void;
+  /** Navigate to a step the work has already reached. No-op otherwise. */
+  goToStep: (step: WizardStep) => void;
+  /** Whether `goToStep` would move to that step — drives the clickable stepper. */
+  canVisit: (step: WizardStep) => boolean;
   goToReview: () => void;
   setDescription: (text: string) => void;
-  goBackToReview: () => void;
   finish: () => void;
+  markPublished: () => void;
   reset: () => void;
+}
+
+/** Extend the navigable range without ever shrinking it. */
+function reach(state: WizardState, step: WizardStep): WizardStep {
+  return stepIndex(step) > stepIndex(state.furthest) ? step : state.furthest;
 }
 
 // ── Store factory ─────────────────────────────────────────────────────────────
 
 export const useWizardStore = create<WizardStore>()(
   persist(
-    (set) => ({
-      state: { step: 'config', config: { ...EMPTY_CONFIG } },
+    (set, get) => ({
+      state: { ...INITIAL_STATE, config: { ...EMPTY_CONFIG } },
       hasHydrated: false,
       setHasHydrated: (value) => set({ hasHydrated: value }),
 
       setConfig: (patch) =>
-        set((s) => {
-          // Only the config step accepts edits to config; other steps freeze it.
-          if (s.state.step !== 'config') return s;
-          return {
-            state: {
-              step: 'config',
-              config: { ...s.state.config, ...patch },
-            },
-          };
-        }),
+        set((s) => ({ state: { ...s.state, config: { ...s.state.config, ...patch } } })),
 
       startUpload: (propertyId) =>
-        set((s) => {
-          if (s.state.step !== 'config') return s;
-          return {
-            state: {
-              step: 'upload',
-              config: s.state.config,
-              propertyId,
-              images: [],
-            },
-          };
-        }),
+        set((s) => ({
+          state: {
+            ...s.state,
+            propertyId,
+            step: 'upload',
+            furthest: reach(s.state, 'upload'),
+          },
+        })),
 
       addImage: (image) =>
-        set((s) => {
-          if (s.state.step !== 'upload') return s;
-          return {
-            state: { ...s.state, images: [...s.state.images, image] },
-          };
-        }),
+        set((s) => ({ state: { ...s.state, images: [...s.state.images, image] } })),
 
       updateImage: (clientId, patch) =>
         set((s) => {
-          if (s.state.step !== 'upload' && s.state.step !== 'review') return s;
           const images = s.state.images.map((img) =>
             img.clientId === clientId ? { ...img, ...patch } : img,
           );
-          return { state: { ...s.state, images } };
+          // Amenities are the facts the description was generated from. Change
+          // them and the existing description is out of date — but only if
+          // there is one; a detection result arriving during upload is not an
+          // edit.
+          const editsAmenities = patch.amenities != null && s.state.description !== '';
+          return {
+            state: {
+              ...s.state,
+              images,
+              descriptionStale: s.state.descriptionStale || editsAmenities,
+            },
+          };
         }),
+
+      canVisit: (step) => {
+        const { state } = get();
+        if (stepIndex(step) > stepIndex(state.furthest)) return false;
+        // Every step past config needs a property to act on.
+        return step === 'config' || state.propertyId != null;
+      },
+
+      goToStep: (step) =>
+        set((s) => (get().canVisit(step) ? { state: { ...s.state, step } } : s)),
 
       goToReview: () =>
-        set((s) => {
-          if (s.state.step !== 'upload') return s;
-          return {
-            state: {
-              step: 'review',
-              config: s.state.config,
-              propertyId: s.state.propertyId,
-              images: s.state.images,
-            },
-          };
-        }),
+        set((s) =>
+          s.state.propertyId == null
+            ? s
+            : { state: { ...s.state, step: 'review', furthest: reach(s.state, 'review') } },
+        ),
 
       setDescription: (text) =>
-        set((s) => {
-          if (s.state.step === 'review') {
-            return {
-              state: {
-                step: 'describe',
-                config: s.state.config,
-                propertyId: s.state.propertyId,
-                images: s.state.images,
-                description: text,
-              },
-            };
-          }
-          if (s.state.step === 'describe') {
-            return { state: { ...s.state, description: text } };
-          }
-          return s;
-        }),
-
-      goBackToReview: () =>
-        set((s) => {
-          // The describe step holds a generated description; walking back to
-          // review discards it. The review page's wrong-step guard would
-          // otherwise bounce the user back to describe, so we have to mutate
-          // the step before navigating.
-          if (s.state.step !== 'describe') return s;
-          return {
-            state: {
-              step: 'review',
-              config: s.state.config,
-              propertyId: s.state.propertyId,
-              images: s.state.images,
-            },
-          };
-        }),
+        set((s) => ({
+          state: {
+            ...s.state,
+            description: text,
+            // The text now reflects whatever the user last approved, whether
+            // it was regenerated or hand-edited.
+            descriptionStale: false,
+            step: 'describe',
+            furthest: reach(s.state, 'describe'),
+          },
+        })),
 
       finish: () =>
-        set((s) => {
-          if (s.state.step !== 'describe') return s;
-          return {
-            state: {
-              step: 'done',
-              config: s.state.config,
-              propertyId: s.state.propertyId,
-              images: s.state.images,
-              description: s.state.description,
-            },
-          };
-        }),
+        set((s) => ({ state: { ...s.state, step: 'done', furthest: reach(s.state, 'done') } })),
 
-      reset: () =>
-        set({
-          state: { step: 'config', config: { ...EMPTY_CONFIG } },
-        }),
+      markPublished: () => set((s) => ({ state: { ...s.state, published: true } })),
+
+      reset: () => set({ state: { ...INITIAL_STATE, config: { ...EMPTY_CONFIG } } }),
     }),
     {
       name: 'wizard',
@@ -251,11 +232,12 @@ export const useWizardStore = create<WizardStore>()(
       partialize: (s) => ({ state: s.state }),
       onRehydrateStorage: () => (rehydrated, error) => {
         if (error != null || rehydrated == null) return;
-        // `done` is terminal — restoring it would trap every subsequent
-        // /detect/* visit on the completion screen. Reset to a clean config
-        // so reopening the app starts a fresh listing.
-        if (rehydrated.state.step === 'done') {
-          rehydrated.state = { step: 'config', config: { ...EMPTY_CONFIG } };
+        // A published listing is finished work. Restoring it would trap every
+        // subsequent /detect/* visit on the completion screen, so reopening
+        // the app starts a fresh listing instead. An unpublished draft is
+        // restored exactly as it was — that is the point of persisting it.
+        if (rehydrated.state.published) {
+          rehydrated.state = { ...INITIAL_STATE, config: { ...EMPTY_CONFIG } };
         }
         rehydrated.setHasHydrated(true);
       },

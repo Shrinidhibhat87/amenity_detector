@@ -31,25 +31,25 @@ export default function UploadStepPage() {
   const addImage = useWizardStore((s) => s.addImage);
   const updateImage = useWizardStore((s) => s.updateImage);
   const goToReview = useWizardStore((s) => s.goToReview);
+  const goToStep = useWizardStore((s) => s.goToStep);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
-  // Wrong-step guard — bounce the user to the correct page. Held back until
-  // the persist middleware finishes restoring so we do not redirect away
-  // from the default `config` state on initial render.
+  // A property has to exist before anything can be uploaded to it. Held back
+  // until the persist middleware finishes restoring so we do not redirect away
+  // from the default state on initial render. Arriving here from a later step
+  // is deliberate — that is how photos get added from review.
   useEffect(() => {
     if (!hasHydrated) return;
-    if (state.step === 'config') router.replace('/detect/config');
-    if (state.step === 'review' || state.step === 'describe' || state.step === 'done') {
-      router.replace(`/detect/${state.step}`);
-    }
-  }, [hasHydrated, state.step, router]);
+    if (state.propertyId == null) router.replace('/detect/config');
+    else if (state.step !== 'upload') goToStep('upload');
+  }, [hasHydrated, state.propertyId, state.step, goToStep, router]);
 
   const startUpload = useCallback(
     async (files: File[]) => {
-      if (state.step !== 'upload') return;
+      if (state.propertyId == null) return;
       setIsUploading(true);
 
       // Register every file in the store upfront so the total count is stable
@@ -148,7 +148,7 @@ export default function UploadStepPage() {
     void startUpload(files);
   }
 
-  if (state.step !== 'upload') return null;
+  if (!hasHydrated || state.propertyId == null) return null;
   const doneCount = state.images.filter((i) => i.status === 'done').length;
   const finishedCount = state.images.filter(
     (i) => i.status === 'done' || i.status === 'failed',
