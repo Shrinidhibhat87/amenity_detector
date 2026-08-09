@@ -82,3 +82,9 @@ GIT_CONVENTIONS.md
 
 # ── Local bug tracker (personal notes, not for shared repo) ──────────────────
 bugs/
+
+# Playwright
+/web/test-results
+/web/playwright-report
+/web/blob-report
+/web/.playwright

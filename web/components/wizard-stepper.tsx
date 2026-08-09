@@ -17,6 +17,10 @@ export function WizardStepper() {
   const furthest = useWizardStore((s) => s.state.furthest);
   const canVisit = useWizardStore((s) => s.canVisit);
   const goToStep = useWizardStore((s) => s.goToStep);
+  // The server renders the default store, the client renders the restored one.
+  // Rendering links off restored state before hydration finishes is a
+  // mismatch, so the stepper stays inert until the store is ready.
+  const hasHydrated = useWizardStore((s) => s.hasHydrated);
 
   const furthestIndex = WIZARD_STEPS.indexOf(furthest);
 
@@ -30,7 +34,7 @@ export function WizardStepper() {
       {WIZARD_STEPS.map((step, i) => {
         const isCurrent = step === current;
         const isReached = i <= furthestIndex;
-        const clickable = !isCurrent && canVisit(step);
+        const clickable = hasHydrated && !isCurrent && canVisit(step);
 
         const marker = (
           <>
