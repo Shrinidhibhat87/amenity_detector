@@ -74,6 +74,10 @@ def test_upgrade_head_creates_full_phase9_schema(fresh_db: str) -> None:
         # Hybrid search additions (0003)
         "description_embedding",
     }
+    # status (0006) is deliberately NOT in the set above: unlike the Phase 9
+    # metadata it is NOT NULL, so it fails the nullability assertion below.
+    assert "status" in property_columns
+    assert property_columns["status"]["nullable"] is False
     assert expected_property_columns <= set(property_columns)
 
     # All Phase 9 property columns must be nullable so legacy rows survive.
@@ -144,6 +148,14 @@ def test_existing_rows_survive_upgrade_with_null_phase9_fields(fresh_db: str) ->
             {"id": "legacy-id-0001"},
         ).one()
         assert embed_row.description_embedding is None
+
+        # A row that was already public before the lifecycle existed stays
+        # public — 0006 backfills it to 'published' rather than 'draft'.
+        status_row = conn.execute(
+            text("SELECT status FROM properties WHERE id = :id"),
+            {"id": "legacy-id-0001"},
+        ).one()
+        assert status_row.status == "published"
 
 
 def test_downgrade_chain_back_to_empty(fresh_db: str) -> None:

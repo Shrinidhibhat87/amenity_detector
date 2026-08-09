@@ -37,6 +37,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from db.status import PropertyStatus
 from db.types import Embedding
 
 # JSONB on PostgreSQL (indexable, typed), plain JSON on SQLite (test path).
@@ -88,6 +89,18 @@ class Property(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         nullable=False,
+    )
+
+    # Publication state. A property is private until it is explicitly published;
+    # every public surface filters on ``status == 'published'``. Allowed values
+    # live in db/status.py. Stored as a plain string (not a DB ENUM) so SQLite
+    # tests and PostgreSQL production agree.
+    status: Mapped[str] = mapped_column(
+        String(24),
+        nullable=False,
+        default=PropertyStatus.DRAFT,
+        server_default=PropertyStatus.DRAFT,
+        index=True,
     )
 
     # --- Phase 9 listing metadata --------------------------------------------
