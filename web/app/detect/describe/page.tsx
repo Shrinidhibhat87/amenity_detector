@@ -11,25 +11,26 @@ export default function DescribeStepPage() {
   const state = useWizardStore((s) => s.state);
   const hasHydrated = useWizardStore((s) => s.hasHydrated);
   const setDescription = useWizardStore((s) => s.setDescription);
-  const goBackToReview = useWizardStore((s) => s.goBackToReview);
+  const goToStep = useWizardStore((s) => s.goToStep);
   const finish = useWizardStore((s) => s.finish);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Wrong-step guard, deferred until persist has rehydrated so the default
-  // state does not bounce the user before the real step is known.
+  // The describe step needs a generated description to edit. Deferred until
+  // persist has rehydrated so the default state does not bounce the user
+  // before the real step is known.
   useEffect(() => {
     if (!hasHydrated) return;
-    if (state.step !== 'describe') {
-      router.replace(state.step === 'done' ? '/detect/done' : `/detect/${state.step}`);
-    }
-  }, [hasHydrated, state.step, router]);
+    if (state.propertyId == null) router.replace('/detect/config');
+    else if (state.description === '') router.replace('/detect/review');
+    else if (state.step !== 'describe') goToStep('describe');
+  }, [hasHydrated, state.propertyId, state.description, state.step, goToStep, router]);
 
-  if (!hasHydrated || state.step !== 'describe') return null;
+  if (!hasHydrated || state.propertyId == null || state.description === '') return null;
+  const propertyId = state.propertyId;
 
   async function save() {
-    if (state.step !== 'describe') return;
     setSaving(true);
     setError(null);
     try {
@@ -37,7 +38,7 @@ export default function DescribeStepPage() {
       // in during the config step. Description goes through the same PATCH
       // endpoint thanks to the schema change in api/schemas.py.
       const { config } = state;
-      await patchProperty(state.propertyId, {
+      await patchProperty(propertyId, {
         description: state.description,
         ...(config.listing_type != null && { listing_type: config.listing_type }),
         ...(config.price != null && { price: config.price }),
@@ -91,8 +92,8 @@ export default function DescribeStepPage() {
           type="button"
           onClick={() => {
             // Walk the step backwards before navigating so the review page's
-            // wrong-step guard does not immediately redirect us back here.
-            goBackToReview();
+            // guard does not immediately redirect us back here.
+            goToStep('review');
             router.push('/detect/review');
           }}
           className="font-mono text-xs uppercase tracking-widest text-ink-muted hover:text-ink transition-colors"
@@ -100,7 +101,7 @@ export default function DescribeStepPage() {
           ← Back to review
         </button>
         <Button onClick={() => void save()} disabled={saving}>
-          {saving ? 'Saving…' : 'Save & publish'}
+          {saving ? 'Saving…' : 'Save & continue'}
         </Button>
       </div>
     </div>

@@ -29,7 +29,7 @@ export default function ConfigStepPage() {
   const setConfig = useWizardStore((s) => s.setConfig);
   const startUpload = useWizardStore((s) => s.startUpload);
 
-  const config = state.step === 'config' ? state.config : null;
+  const config = state.config;
 
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -55,10 +55,8 @@ export default function ConfigStepPage() {
     };
   }, []);
 
-  // If we're past the config step, redirect to wherever we left off.
-  // Lets the user pick up a wizard run across reloads (persist middleware).
-  // Skipped until hydration finishes so the SSR default (`step: 'config'`)
-  // does not flash a wrong redirect.
+  // Resume where the work left off. Skipped until hydration finishes so the
+  // SSR default (`step: 'config'`) does not flash a wrong redirect.
   useEffect(() => {
     if (!hasHydrated) return;
     if (state.step !== 'config') {
@@ -66,14 +64,14 @@ export default function ConfigStepPage() {
     }
   }, [hasHydrated, state.step, router]);
 
-  if (!hasHydrated || config == null) return null;
+  if (!hasHydrated) return null;
 
   const radiusKm = (config.radius_m ?? DEFAULT_RADIUS_M) / 1000;
   const radiusFillPct = ((radiusKm - MIN_RADIUS_KM) / (MAX_RADIUS_KM - MIN_RADIUS_KM)) * 100;
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (config == null || config.name.trim() === '' || config.model_name === '') {
+    if (config.name.trim() === '' || config.model_name === '') {
       setSubmitError('Name and model are required.');
       return;
     }

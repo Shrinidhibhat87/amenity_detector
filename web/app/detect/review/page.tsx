@@ -19,23 +19,22 @@ export default function ReviewStepPage() {
   const hasHydrated = useWizardStore((s) => s.hasHydrated);
   const updateImage = useWizardStore((s) => s.updateImage);
   const setDescription = useWizardStore((s) => s.setDescription);
+  const goToStep = useWizardStore((s) => s.goToStep);
 
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Wrong-step guard. Held until rehydration completes so the default
-  // state does not trigger a redirect before the persisted step is known.
+  // Review needs a property with images. Held until rehydration completes so
+  // the default state does not trigger a redirect before the persisted step
+  // is known.
   useEffect(() => {
     if (!hasHydrated) return;
-    if (state.step === 'config' || state.step === 'upload') {
-      router.replace(`/detect/${state.step}`);
-    }
-    if (state.step === 'describe' || state.step === 'done') {
-      router.replace(`/detect/${state.step}`);
-    }
-  }, [hasHydrated, state.step, router]);
+    if (state.propertyId == null) router.replace('/detect/config');
+    else if (state.step !== 'review') goToStep('review');
+  }, [hasHydrated, state.propertyId, state.step, goToStep, router]);
 
-  if (!hasHydrated || state.step !== 'review') return null;
+  if (!hasHydrated || state.propertyId == null) return null;
+  const propertyId = state.propertyId;
 
   const doneImages = state.images.filter(
     (img): img is UploadedImage & { serverId: string; amenities: AmenityItem[] } =>
@@ -52,17 +51,15 @@ export default function ReviewStepPage() {
   }
 
   async function setPrimary(image: UploadedImage & { serverId: string }) {
-    if (state.step !== 'review') return;
     try {
       // Tell the server which image is primary so JSON-LD / OG tags pick it.
-      await patchImage(state.propertyId, image.serverId, { is_primary: true });
+      await patchImage(propertyId, image.serverId, { is_primary: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to set primary.');
     }
   }
 
   async function generate() {
-    if (state.step !== 'review') return;
     setGenerating(true);
     setError(null);
 
@@ -76,7 +73,7 @@ export default function ReviewStepPage() {
     );
 
     try {
-      const res = await describeProperty(state.propertyId, {
+      const res = await describeProperty(propertyId, {
         amenities: flat,
         model_name: state.config.model_name,
       });
@@ -174,14 +171,30 @@ export default function ReviewStepPage() {
       <div className="flex items-center justify-between">
         <button
           type="button"
-          onClick={() => router.push('/detect/upload')}
+          onClick={() => {
+            // Move the step with the navigation, otherwise the upload page
+            // bounces straight back here.
+            goToStep('upload');
+            router.push('/detect/upload');
+          }}
           className="font-mono text-xs uppercase tracking-widest text-ink-muted hover:text-ink transition-colors"
         >
           ← Add more photos
         </button>
-        <Button onClick={() => void generate()} disabled={generating || doneImages.length === 0}>
-          {generating ? 'Generating…' : 'Generate description →'}
-        </Button>
+        <div className="flex items-center gap-3">
+          {state.descriptionStale && (
+            <p className="font-mono text-[11px] text-warn">
+              Amenities changed — regenerate the description.
+            </p>
+          )}
+          <Button onClick={() => void generate()} disabled={generating || doneImages.length === 0}>
+            {generating
+              ? 'Generating…'
+              : state.description !== ''
+                ? 'Regenerate description →'
+                : 'Generate description →'}
+          </Button>
+        </div>
       </div>
     </div>
   );
