@@ -39,6 +39,7 @@ def seeded_db(db_session: Session) -> Session:
             locality="Frankfurt",
             country_code="DE",
             created_at=datetime.now(UTC),
+            status="published",
         ),
         Property(
             id="p-rent-2bhk-eur",
@@ -52,6 +53,7 @@ def seeded_db(db_session: Session) -> Session:
             locality="Berlin",
             country_code="DE",
             created_at=datetime.now(UTC),
+            status="published",
         ),
         Property(
             id="p-sale-villa",
@@ -65,6 +67,7 @@ def seeded_db(db_session: Session) -> Session:
             locality="Bali",
             country_code="ID",
             created_at=datetime.now(UTC),
+            status="published",
         ),
     ]
     for p in props:

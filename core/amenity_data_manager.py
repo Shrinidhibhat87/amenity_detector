@@ -23,6 +23,7 @@ from sqlalchemy import and_, exists, select
 from sqlalchemy.orm import Session
 
 from db.models import DetectedAmenity, Property, PropertyImage
+from db.status import PropertyStatus
 
 
 class AmenityDataManager:
@@ -287,12 +288,20 @@ class AmenityDataManager:
         Returns:
             The Property ORM object, or None if no row has that slug.
         """
-        stmt = select(Property).where(Property.slug == slug).limit(1)
+        stmt = (
+            select(Property)
+            .where(Property.slug == slug, Property.status == PropertyStatus.PUBLISHED)
+            .limit(1)
+        )
         return self.db.scalars(stmt).one_or_none()
 
     def list_properties(self, offset: int = 0, limit: int = 20) -> list[Property]:
         """
-        Return a paginated list of all properties, newest first.
+        Return a paginated list of published properties, newest first.
+
+        Unpublished rows are excluded: this feeds browse, the sitemap,
+        llms.txt and the JSONL feed, none of which may show a draft. A draft
+        is reached through ``get_property`` by id instead.
 
         Args:
             offset: Number of rows to skip (for pagination). Default: 0.
@@ -301,12 +310,18 @@ class AmenityDataManager:
         Returns:
             List of Property ORM objects.
         """
-        stmt = select(Property).order_by(Property.created_at.desc()).offset(offset).limit(limit)
+        stmt = (
+            select(Property)
+            .where(Property.status == PropertyStatus.PUBLISHED)
+            .order_by(Property.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
         return list(self.db.scalars(stmt))
 
     def search_properties_by_amenities(self, amenity_names: list[str]) -> list[Property]:
         """
-        Return properties where ALL requested amenities are present in at least one image.
+        Return published properties where ALL requested amenities are present in an image.
 
         How the query works:
           For each amenity name in the list, we check that there EXISTS at least one
@@ -339,7 +354,11 @@ class AmenityDataManager:
             for name in amenity_names
         ]
 
-        stmt = select(Property).where(and_(*conditions)).order_by(Property.created_at.desc())
+        stmt = (
+            select(Property)
+            .where(and_(Property.status == PropertyStatus.PUBLISHED, *conditions))
+            .order_by(Property.created_at.desc())
+        )
         return list(self.db.scalars(stmt))
 
     # ── DELETE ──────────────────────────────────────────────────────────────────

@@ -24,10 +24,12 @@ def _sql(filter_: SearchFilter) -> str:
 
 
 class TestEmptyFilter:
-    def test_no_constraints_selects_all_with_cap(self) -> None:
+    def test_no_constraints_selects_all_published_with_cap(self) -> None:
         sql = _sql(SearchFilter())
         assert "FROM properties" in sql
-        assert "WHERE" not in sql.upper().split("LIMIT")[0]
+        # Search is public, so the published predicate is always there even
+        # when the parsed filter is empty.
+        assert "properties.status" in sql
         assert f"LIMIT {CANDIDATE_LIMIT}" in sql
 
 
