@@ -230,6 +230,21 @@ export const useWizardStore = create<WizardStore>()(
       // the factory anyway). hasHydrated is intentionally excluded so it
       // always starts false until the rehydrate callback fires.
       partialize: (s) => ({ state: s.state }),
+      // The default merge is shallow, so a blob written before a field existed
+      // restores `state` without it — `state.images.filter(...)` then throws on
+      // the upload step. Layering the persisted state over INITIAL_STATE keeps
+      // older drafts loadable as the shape grows.
+      merge: (persisted, current) => ({
+        ...current,
+        state: {
+          ...INITIAL_STATE,
+          ...(persisted as { state?: Partial<WizardState> } | undefined)?.state,
+          config: {
+            ...EMPTY_CONFIG,
+            ...(persisted as { state?: Partial<WizardState> } | undefined)?.state?.config,
+          },
+        },
+      }),
       onRehydrateStorage: () => (rehydrated, error) => {
         if (error != null || rehydrated == null) return;
         // A published listing is finished work. Restoring it would trap every
