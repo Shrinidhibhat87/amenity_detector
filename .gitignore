@@ -58,9 +58,11 @@ storage/          # Uploaded images (runtime data, not for git)
 *.sql.dump
 
 # ── Project documentation (internal only, not for public GitHub) ─────────────
-SPEC.md
+# Public architecture docs live next to the code: Readme.md, api/README.md,
+# core/README.md, db/README.md. Everything below is planning/handbook material.
+# SPEC.md and ARCHITECTURE.md were retired on 2026-08-09 — the plan now lives in
+# docs/plans/roadmap.md and the architecture in the per-directory READMEs.
 CLAUDE.md
-ARCHITECTURE.md
 resources/
 docs/
 
