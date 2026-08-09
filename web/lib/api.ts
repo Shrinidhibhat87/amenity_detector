@@ -224,6 +224,20 @@ export async function patchProperty(
   });
 }
 
+/**
+ * Make a finished listing publicly visible.
+ *
+ * Deliberately separate from patchProperty: saving a draft and publishing it
+ * are different decisions, and only this call puts a listing in front of
+ * strangers. The server answers 409 when the listing is not complete enough.
+ */
+export async function publishProperty(propertyId: string): Promise<PropertyDetail> {
+  return apiFetch(PropertyDetail, `/api/v1/properties/${propertyId}/publish`, {
+    method: 'POST',
+    cache: 'no-store',
+  });
+}
+
 // ── Locality enrichment ───────────────────────────────────────────────────────
 // `POST /api/v1/locality` previews enrichment for a PIN (+ optional street)
 // without persisting; `POST /api/v1/properties/{id}/locality` runs and persists

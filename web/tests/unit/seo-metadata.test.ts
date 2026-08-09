@@ -19,6 +19,7 @@ function twitter(m: Metadata): TwitterWithCard {
 const minDetail: PropertyDetail = {
   id: 'prop-1',
   name: 'Sachsenhausen Apartment',
+  status: 'published' as const,
   description: null,
   model_used: null,
   extra_info: null,

@@ -32,6 +32,7 @@ function detail(overrides: Record<string, unknown> = {}): PropertyDetail {
   return {
     id: 'p1',
     name: 'Frankfurt flat',
+    status: 'published' as const,
     description: null,
     model_used: null,
     extra_info: null,

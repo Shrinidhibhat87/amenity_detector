@@ -65,6 +65,20 @@ export const PropertyImage = z.object({
 });
 export type PropertyImage = z.infer<typeof PropertyImage>;
 
+// ── Publication status (mirrors db/status.py) ────────────────────────────────
+// Only 'published' listings appear on the public surfaces; the wizard reads
+// the status to tell a live listing from a draft it is still previewing.
+export const PropertyStatus = z.enum([
+  'draft',
+  'processing',
+  'ready_for_review',
+  'completed',
+  'published',
+  'failed',
+  'partially_completed',
+]);
+export type PropertyStatus = z.infer<typeof PropertyStatus>;
+
 // ── Shared Phase 9 listing metadata block ────────────────────────────────────
 const ListingMetadata = z.object({
   slug: z.string().nullable().default(null),
@@ -90,6 +104,7 @@ const ListingMetadata = z.object({
 export const PropertySummary = ListingMetadata.extend({
   id: z.string(),
   name: z.string(),
+  status: PropertyStatus.default('draft'),
   description: z.string().nullable(),
   model_used: z.string().nullable(),
   extra_info: z.string().nullable(),
@@ -147,6 +162,7 @@ export type LocalityInsight = z.infer<typeof LocalityInsight>;
 export const PropertyDetail = ListingMetadata.extend({
   id: z.string(),
   name: z.string(),
+  status: PropertyStatus.default('draft'),
   description: z.string().nullable(),
   model_used: z.string().nullable(),
   extra_info: z.string().nullable(),

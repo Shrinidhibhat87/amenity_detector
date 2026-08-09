@@ -7,6 +7,7 @@ const SITE_URL = 'https://example.com';
 const minProp: PropertyDetail = {
   id: 'prop-uuid-1',
   name: 'Example',
+  status: 'published' as const,
   description: null,
   model_used: null,
   extra_info: null,

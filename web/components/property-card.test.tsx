@@ -9,6 +9,7 @@ vi.stubEnv('NEXT_PUBLIC_API_BASE_URL', 'http://test:8000');
 const base: PropertySummary = {
   id: 'prop-1',
   name: 'Sunny Loft',
+  status: 'published' as const,
   created_at: '2024-06-01T10:00:00',
   description: 'A nice place',
   model_used: null,

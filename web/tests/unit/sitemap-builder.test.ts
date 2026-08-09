@@ -8,6 +8,7 @@ const NOW = new Date('2026-05-21T10:00:00Z');
 const baseSummary: PropertySummary = {
   id: 'prop-1',
   name: 'Sachsenhausen Apartment',
+  status: 'published' as const,
   description: null,
   model_used: null,
   extra_info: null,
