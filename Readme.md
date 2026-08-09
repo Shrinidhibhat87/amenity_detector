@@ -439,4 +439,6 @@ amenity_detector/
 - OpenRouter is paid. Set a spending cap in the OpenRouter dashboard before
   long evaluations.
 - Runtime uploads are stored under `storage/` and are not committed.
-- `ARCHITECTURE.md`, `SPEC.md`, and internal handbook files are gitignored.
+- Architecture documentation lives next to the code it describes: this file plus
+  `api/README.md`, `core/README.md`, `core/locality/README.md`, and
+  `db/README.md`. Planning and internal handbook documents are gitignored.
