@@ -30,11 +30,15 @@ const SITE_URL = process.env['NEXT_PUBLIC_SITE_URL'] ?? 'http://localhost:3000';
  * caller is redirected to the slug URL (308 permanent) so search engines
  * collapse the two URLs onto the canonical one and the share-link looks
  * human-readable. Legacy rows without a slug stay reachable at their UUID.
+ *
+ * Drafts are the exception: slug lookup is published-only, so redirecting an
+ * unpublished property to its slug would 404 the wizard's own preview link.
+ * The UUID URL is that private preview and stays as it is until publish.
  */
 async function resolveProperty(handle: string): Promise<PropertyDetail> {
   if (looksLikeUuid(handle)) {
     const p = await getProperty(handle);
-    if (p.slug != null && p.slug.length > 0) {
+    if (p.status === 'published' && p.slug != null && p.slug.length > 0) {
       // 308 — preserves method and tells the crawler this is the new home.
       permanentRedirect(`/properties/${p.slug}`);
     }
