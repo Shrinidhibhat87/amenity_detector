@@ -7,6 +7,21 @@ import { useWizardStore, type ConfigInput } from '@/lib/wizard-store';
 import type { ModelInfo, PropertyCreateRequest } from '@/lib/schemas';
 import { Button, Input, Select } from '@/components/ui';
 
+// Countries we bias the PIN lookup to. DE leads — the target portals are German.
+const COUNTRIES = [
+  { value: 'DE', label: '🇩🇪 Germany' },
+  { value: 'AT', label: '🇦🇹 Austria' },
+  { value: 'CH', label: '🇨🇭 Switzerland' },
+  { value: 'NL', label: '🇳🇱 Netherlands' },
+  { value: 'FR', label: '🇫🇷 France' },
+  { value: 'GB', label: '🇬🇧 United Kingdom' },
+  { value: 'US', label: '🇺🇸 United States' },
+] as const;
+
+const MIN_RADIUS_KM = 1;
+const MAX_RADIUS_KM = 10;
+const DEFAULT_RADIUS_M = 3000;
+
 export default function ConfigStepPage() {
   const router = useRouter();
   const state = useWizardStore((s) => s.state);
@@ -53,6 +68,9 @@ export default function ConfigStepPage() {
 
   if (!hasHydrated || config == null) return null;
 
+  const radiusKm = (config.radius_m ?? DEFAULT_RADIUS_M) / 1000;
+  const radiusFillPct = ((radiusKm - MIN_RADIUS_KM) / (MAX_RADIUS_KM - MIN_RADIUS_KM)) * 100;
+
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (config == null || config.name.trim() === '' || config.model_name === '') {
@@ -80,7 +98,11 @@ export default function ConfigStepPage() {
           available_from: config.available_from,
           locality: config.locality,
           postal_code: config.postal_code,
-          country_code: config.country_code,
+          // Default the country so the address stored on the listing matches
+          // the one the enrichment will query. `street` and `radius_m` stay
+          // client-side: they parameterise the lookup, they are not listing
+          // metadata.
+          country_code: config.country_code ?? 'DE',
         }),
       };
       const res = await createProperty(body);
@@ -132,6 +154,71 @@ export default function ConfigStepPage() {
         {modelsError != null && (
           <p className="text-warn text-sm font-mono">{modelsError}</p>
         )}
+      </section>
+
+      {/* Address — entered once, here. It is stored on the listing and is the
+          input to the neighbourhood enrichment that runs during upload. */}
+      <section className="space-y-4">
+        <div className="space-y-1">
+          <h2 className="font-display text-xl text-ink">Where is it?</h2>
+          <p className="text-sm text-ink-soft">
+            The PIN code drives the neighbourhood section (Lage). Leave it blank to skip
+            that section entirely.
+          </p>
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Select
+            label="Country"
+            value={config.country_code ?? 'DE'}
+            onChange={(e) => setConfig({ country_code: e.target.value || undefined })}
+            options={COUNTRIES}
+          />
+          <Input
+            label="PIN code"
+            value={config.postal_code ?? ''}
+            onChange={(e) => setConfig({ postal_code: e.target.value || undefined })}
+            placeholder="60311"
+            inputMode="numeric"
+          />
+          <Input
+            label="Street (optional)"
+            value={config.street ?? ''}
+            onChange={(e) => setConfig({ street: e.target.value || undefined })}
+            placeholder="Bendelstraße"
+          />
+          <Input
+            label="City / district (optional)"
+            value={config.locality ?? ''}
+            onChange={(e) => setConfig({ locality: e.target.value || undefined })}
+            placeholder="Frankfurt"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="flex items-baseline justify-between">
+            <label htmlFor="locality-radius" className="text-xs font-medium text-ink-soft">
+              Neighbourhood search radius
+            </label>
+            <span className="font-mono text-xs text-accent tabular-nums">{radiusKm} km</span>
+          </div>
+          <input
+            id="locality-radius"
+            type="range"
+            className="ad-range"
+            style={{ ['--ad-range-fill' as string]: `${radiusFillPct}%` }}
+            min={MIN_RADIUS_KM}
+            max={MAX_RADIUS_KM}
+            step={1}
+            value={radiusKm}
+            aria-label="Search radius in kilometres"
+            onChange={(e) => setConfig({ radius_m: Number(e.target.value) * 1000 })}
+          />
+          <div className="flex justify-between font-mono text-[10px] text-ink-faint">
+            <span>{MIN_RADIUS_KM} km</span>
+            <span>{MAX_RADIUS_KM} km</span>
+          </div>
+        </div>
       </section>
 
       <section>
@@ -252,21 +339,6 @@ export default function ConfigStepPage() {
                 { value: 'semi_furnished', label: 'Semi-furnished' },
                 { value: 'unfurnished', label: 'Unfurnished' },
               ]}
-            />
-            <Input
-              label="Locality"
-              value={config.locality ?? ''}
-              onChange={(e) => setConfig({ locality: e.target.value || undefined })}
-              placeholder="Berlin"
-            />
-            <Input
-              label="Country (ISO-2)"
-              value={config.country_code ?? ''}
-              onChange={(e) =>
-                setConfig({ country_code: e.target.value.toUpperCase() || undefined })
-              }
-              placeholder="DE"
-              maxLength={2}
             />
           </div>
         )}
