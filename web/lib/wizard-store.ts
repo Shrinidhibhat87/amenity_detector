@@ -40,6 +40,12 @@ export interface ConfigInput {
   locality?: string | undefined;
   postal_code?: string | undefined;
   country_code?: string | undefined;
+  // Address entered once, in the config step. `street` and `radius_m` are not
+  // property columns — they parameterise the locality enrichment that runs on
+  // the upload step, which is why they live on the wizard config rather than
+  // in the listing metadata sent to POST /properties.
+  street?: string | undefined;
+  radius_m?: number | undefined;
 }
 
 export interface AmenityItem {

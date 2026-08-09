@@ -16,7 +16,7 @@ import {
   type UploadedImage,
 } from '@/lib/wizard-store';
 import { Button } from '@/components/ui';
-import { LocationInput } from '@/components/location-input';
+import { LocalityEnrichment } from '@/components/locality-enrichment';
 
 // Per-image timeout — matches the Gradio UI's skip-on-failure pattern so a
 // slow / stuck VLM call does not block the whole batch.
@@ -173,9 +173,16 @@ export default function UploadStepPage() {
         </p>
       </header>
 
-      {/* Location side panel — runs the locality agent in the background while
-          images upload, so the Lage blurb is ready by the review step. */}
-      <LocationInput propertyId={state.propertyId} />
+      {/* Runs the locality agent for the address entered in the config step,
+          in the background while images upload, so the Lage blurb is ready by
+          the review step. */}
+      <LocalityEnrichment
+        propertyId={state.propertyId}
+        postalCode={state.config.postal_code}
+        street={state.config.street}
+        countryCode={state.config.country_code}
+        radiusM={state.config.radius_m}
+      />
 
       {/* Dropzone */}
       <div
