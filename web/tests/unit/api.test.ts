@@ -312,11 +312,12 @@ describe('patchImage', () => {
     display_order: 0,
   };
 
-  it('sends PATCH with JSON body', async () => {
+  it('sends PATCH with JSON body to the top-level image route', async () => {
     mockFetch.mockResolvedValueOnce(okResponse(minImage));
-    await patchImage('p-1', 'img-1', { is_primary: true, alt_text: 'kitchen' });
+    await patchImage('img-1', { is_primary: true, alt_text: 'kitchen' });
 
-    const init = (mockFetch.mock.calls[0] as [string, RequestInit])[1];
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${BASE}/api/v1/images/img-1`);
     expect(init.method).toBe('PATCH');
     expect(init.body).toBe(JSON.stringify({ is_primary: true, alt_text: 'kitchen' }));
   });

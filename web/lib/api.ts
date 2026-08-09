@@ -187,12 +187,13 @@ export async function uploadImage(args: UploadImageArgs): Promise<ImageDetection
   );
 }
 
+// Images are addressed by their own id, not under their property — the id is
+// already unique, so the API exposes them at the top level.
 export async function patchImage(
-  propertyId: string,
   imageId: string,
   patch: ImageUpdateRequest,
 ): Promise<PropertyImage> {
-  return apiFetch(PropertyImage, `/api/v1/properties/${propertyId}/images/${imageId}`, {
+  return apiFetch(PropertyImage, `/api/v1/images/${imageId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
