@@ -23,6 +23,9 @@ export default function ReviewStepPage() {
 
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Server id of the hero image, once the user picks one. Not persisted: the
+  // flag lives on the server and the wizard never reads it back.
+  const [primaryId, setPrimaryId] = useState<string | null>(null);
 
   // Review needs a property with images. Held until rehydration completes so
   // the default state does not trigger a redirect before the persisted step
@@ -51,9 +54,11 @@ export default function ReviewStepPage() {
   }
 
   async function setPrimary(image: UploadedImage & { serverId: string }) {
+    setError(null);
     try {
       // Tell the server which image is primary so JSON-LD / OG tags pick it.
-      await patchImage(propertyId, image.serverId, { is_primary: true });
+      await patchImage(image.serverId, { is_primary: true });
+      setPrimaryId(image.serverId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to set primary.');
     }
@@ -130,13 +135,19 @@ export default function ReviewStepPage() {
                       {img.roomType ?? 'unknown room'}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void setPrimary(img)}
-                    className="font-mono text-[11px] uppercase tracking-widest text-ink-muted hover:text-accent transition-colors"
-                  >
-                    Make primary
-                  </button>
+                  {primaryId === img.serverId ? (
+                    <span className="font-mono text-[11px] uppercase tracking-widest text-accent">
+                      ★ Primary
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void setPrimary(img)}
+                      className="font-mono text-[11px] uppercase tracking-widest text-ink-muted hover:text-accent transition-colors"
+                    >
+                      Make primary
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap gap-1.5">
