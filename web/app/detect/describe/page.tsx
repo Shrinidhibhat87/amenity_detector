@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ApiError, patchProperty } from '@/lib/api';
 import { useWizardStore } from '@/lib/wizard-store';
+import { useWizardStepSync } from '@/lib/use-wizard-step';
 import { Button } from '@/components/ui';
 
 export default function DescribeStepPage() {
@@ -24,8 +25,8 @@ export default function DescribeStepPage() {
     if (!hasHydrated) return;
     if (state.propertyId == null) router.replace('/detect/config');
     else if (state.description === '') router.replace('/detect/review');
-    else if (state.step !== 'describe') goToStep('describe');
-  }, [hasHydrated, state.propertyId, state.description, state.step, goToStep, router]);
+  }, [hasHydrated, state.propertyId, state.description, router]);
+  useWizardStepSync('describe');
 
   if (!hasHydrated || state.propertyId == null || state.description === '') return null;
   const propertyId = state.propertyId;

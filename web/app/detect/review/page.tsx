@@ -11,6 +11,7 @@ import {
   shouldUnoptimizeApiImages,
 } from '@/lib/api';
 import { useWizardStore, type AmenityItem, type UploadedImage } from '@/lib/wizard-store';
+import { useWizardStepSync } from '@/lib/use-wizard-step';
 import { Button } from '@/components/ui';
 
 export default function ReviewStepPage() {
@@ -33,8 +34,8 @@ export default function ReviewStepPage() {
   useEffect(() => {
     if (!hasHydrated) return;
     if (state.propertyId == null) router.replace('/detect/config');
-    else if (state.step !== 'review') goToStep('review');
-  }, [hasHydrated, state.propertyId, state.step, goToStep, router]);
+  }, [hasHydrated, state.propertyId, router]);
+  useWizardStepSync('review');
 
   if (!hasHydrated || state.propertyId == null) return null;
   const propertyId = state.propertyId;
